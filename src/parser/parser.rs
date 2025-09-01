@@ -123,7 +123,7 @@ impl Parser
 
         if  self.match_tokens(&[TokenType::Keyword(Keyword::If)])
         {
-            todo!("if statement parsing not implemented yet");
+            //todo!("if statement parsing not implemented yet");
         }
         else if self.match_tokens(&[TokenType::Keyword(Keyword::Print)])
         {
