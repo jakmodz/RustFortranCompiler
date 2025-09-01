@@ -1,0 +1,180 @@
+🔑 Core Features of Fortran 90/95 to Implement
+1. Program Structure
+
+Program units:
+
+PROGRAM
+
+MODULE
+
+SUBROUTINE
+
+FUNCTION
+
+BLOCK DATA (legacy, less used)
+
+IMPLICIT NONE and explicit typing
+
+USE for importing modules
+
+CONTAINS for internal procedures
+
+2. Data Types & Declarations
+
+Intrinsic types:
+
+INTEGER
+
+REAL
+
+DOUBLE PRECISION
+
+COMPLEX
+
+LOGICAL
+
+CHARACTER
+
+Derived types (TYPE ... END TYPE)
+
+PARAMETER constants
+
+KIND type parameters
+
+Attributes:
+
+ALLOCATABLE
+
+POINTER
+
+TARGET
+
+DIMENSION
+
+INTENT (in, out, inout)
+
+OPTIONAL
+
+SAVE
+
+PUBLIC / PRIVATE
+
+3. Expressions and Operators
+
+Arithmetic: + - * / **
+
+Relational: .EQ., .NE., .GT., .GE., .LT., .LE.
+
+Logical: .NOT., .AND., .OR., .XOR.
+
+Character concatenation: //
+
+Array operations:
+
+Whole-array assignment
+
+Elemental operations (e.g., A = B + C)
+
+Array sections (e.g., A(1:10:2))
+
+4. Control Constructs
+
+IF ... THEN ... ELSEIF ... ELSE ... END IF
+
+SELECT CASE ... END SELECT
+
+DO loops:
+
+DO i = 1, n
+
+DO WHILE (...)
+
+EXIT, CYCLE
+
+WHERE / ELSEWHERE for arrays
+
+FORALL (Fortran 95 addition)
+
+5. Procedures
+
+SUBROUTINE and FUNCTION
+
+Recursive procedures (RECURSIVE)
+
+Optional arguments (OPTIONAL, PRESENT)
+
+Generic interfaces (INTERFACE ... END INTERFACE)
+
+Operator overloading (INTERFACE OPERATOR(+))
+
+Assignment overloading (INTERFACE ASSIGNMENT(=))
+
+6. Modules & Scope
+
+Encapsulation with MODULE
+
+USE with ONLY for selective imports
+
+Visibility control with PUBLIC / PRIVATE
+
+Internal procedures via CONTAINS
+
+7. Memory & Arrays
+
+ALLOCATABLE arrays
+
+ALLOCATE, DEALLOCATE
+
+Assumed-shape arrays (REAL, DIMENSION(:) :: arr)
+
+Array intrinsics: SIZE, SHAPE, ALLOCATED, etc.
+
+Dynamic memory and pointers (POINTER, TARGET, NULLIFY, ASSOCIATED)
+
+8. Input/Output
+
+Formatted and unformatted I/O (READ, WRITE)
+
+Internal file I/O (read/write to a character string)
+
+OPEN, CLOSE, INQUIRE, REWIND, BACKSPACE, ENDFILE
+
+NAMELIST
+
+9. Intrinsic Procedures
+
+A big set of intrinsics, grouped as:
+
+Numeric: ABS, SIN, COS, LOG, EXP, SQRT, MOD, etc.
+
+Array: SUM, PRODUCT, MAXVAL, MINVAL, MATMUL, TRANSPOSE
+
+Inquiry: KIND, LEN, ALLOCATED, PRESENT
+
+Type conversion: REAL, INT, NINT
+
+Bit manipulation: IAND, IOR, NOT, ISHFT, etc.
+
+10. Fortran 95 Additions (beyond Fortran 90)
+
+FORALL construct and statement
+
+PURE procedures (no side effects)
+
+ELEMENTAL procedures (apply element-wise to arrays)
+
+Pointer initialization (=> NULL())
+
+Enhanced WHERE construct
+
+⚙️ Implementation Phases (suggested)
+
+Since implementing all at once is massive, you might phase it:
+
+Minimal compiler (integer/real variables, basic arithmetic, simple DO loops, IF, simple I/O).
+
+Core Fortran 90 (arrays, modules, subroutines/functions, allocation).
+
+Advanced features (pointers, operator overloading, generic interfaces).
+
+Fortran 95 extensions (FORALL, PURE, ELEMENTAL).
