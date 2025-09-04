@@ -272,7 +272,7 @@ impl Parser
             TokenType::Real(value) =>
                 {
                     self.advance();
-                    let literal = Expr::Literal { value: Literal::Real(value) };
+                    let literal = Expr::Literal { value: Literal::Real(value)};
                      Ok(Box::new(literal))
                 }
             TokenType::Double(value) =>

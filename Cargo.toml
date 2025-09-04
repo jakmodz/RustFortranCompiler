@@ -4,4 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-inkwell = { version = "0.6.0", features = ["llvm18-1"] }
+cranelift = "0.102"
+cranelift-codegen = "0.102"
+cranelift-frontend = "0.102"
+cranelift-module = "0.102"
+cranelift-object = "0.102"
+target-lexicon = "0.12"
+anyhow = "1.0"

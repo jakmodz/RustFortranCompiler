@@ -5,7 +5,7 @@ pub enum TokenType
 {
     //literal
     Character(String),
-    Real(f64),
+    Real(f32),
     Double(f64),
     Int(i64),
 
@@ -51,6 +51,48 @@ pub enum TokenType
 
     // Special
     Eof,
+}
+impl TokenType
+{
+    pub fn string(&self)-> &'static str
+    {
+        match  self
+        {
+            TokenType::Character(_) => "Character",
+            TokenType::Real(_) => "Real",
+            TokenType::Double(_) => "Double",
+            TokenType::Int(_) => "Int",
+            TokenType::Identifier(_) => "Identifier",
+            TokenType::Keyword(_) => "Keyword",
+            TokenType::Plus => "Plus",
+            TokenType::Minus => "Minus",
+            TokenType::Star => "Star",
+            TokenType::Slash => "Slash",
+            TokenType::StarStar => "StarStar",
+            TokenType::Eq => "Eq",
+            TokenType::Ne => "Ne",
+            TokenType::Lt => "Lt",
+            TokenType::Le => "Le",
+            TokenType::Gt => "Gt",
+            TokenType::Ge => "Ge",
+            TokenType::And => "And",
+            TokenType::Or => "Or",
+            TokenType::Not => "Not",
+            TokenType::Eqv => "Eqv",
+            TokenType::Neqv => "Neqv",
+            TokenType::LeftParen => "LeftParen",
+            TokenType::RightParen => "RightParen",
+            TokenType::LeftBracket => "LeftBracket",
+            TokenType::RightBracket => "RightBracket",
+            TokenType::Comma => "Comma",
+            TokenType::Colon => "Colon",
+            TokenType::ColonColon => "ColonColon",
+            TokenType::Semicolon => "Semicolon",
+            TokenType::Percent => "Percent",
+            TokenType::Assign => "Assign",
+            TokenType::Eof => "Eof",
+        }
+    }
 }
 
 

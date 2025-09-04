@@ -5,7 +5,7 @@ use crate::lexer::token::{Token, TokenType};
 pub enum Literal
 {
     Int(i64),
-    Real(f64),
+    Real(f32),
     Double(f64),
     Character(String),
 }
@@ -30,6 +30,11 @@ pub enum Stmt
     Print{expr:Box<Expr>},
 
 
+}
+pub struct Program
+{
+    pub stmts: Vec<Stmt>,
+    pub name: String
 }
 
 #[derive(Debug,Clone)]
