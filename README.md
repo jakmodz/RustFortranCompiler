@@ -1,6 +1,6 @@
 # Rust Fortran Compiler
 
-fortran compiler written in rust with  llvm backend 
+fortran compiler written in rust with  cranelift backend 
 
 
 ## Why?
