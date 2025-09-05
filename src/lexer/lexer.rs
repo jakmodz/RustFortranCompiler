@@ -41,15 +41,15 @@ impl Lexer
     {
 
         let mut keywords = HashMap::new();
-        keywords.insert("program".to_string(), Keyword::Program);
-        keywords.insert("end".to_string(), Keyword::End);
+        keywords.insert("PROGRAM".to_string(), Keyword::Program);
+        keywords.insert("END".to_string(), Keyword::End);
         keywords.insert("module".to_string(), Keyword::Module);
         keywords.insert("use".to_string(), Keyword::Use);
         keywords.insert("contains".to_string(), Keyword::Contains);
         keywords.insert("subroutine".to_string(), Keyword::Subroutine);
         keywords.insert("function".to_string(), Keyword::Function);
         keywords.insert("return".to_string(), Keyword::Return);
-        keywords.insert("integer".to_string(), Keyword::Integer);
+        keywords.insert("INTEGER".to_string(), Keyword::Integer);
         keywords.insert("real".to_string(), Keyword::Real);
         keywords.insert("doubleprecision".to_string(), Keyword::DoublePrecision);
         keywords.insert("complex".to_string(), Keyword::Complex);
@@ -141,57 +141,39 @@ impl Lexer
     fn number(&mut self) -> Result<Token,LexerError>
     {
         let mut num_str = String::new();
-        while self.current_char().is_ascii_digit()
-        {
+        while self.current_char().is_ascii_digit() {
             num_str.push(self.advance());
         }
 
-        if self.current_char() == '.'
-        {
+        if self.current_char() == '.' {
             num_str.push(self.advance());
-            while self.current_char().is_ascii_digit()
-            {
+            while self.current_char().is_ascii_digit() {
                 num_str.push(self.advance());
             }
-            if let Some('e') | Some('E') = self.peek()
-            {
+        }
+
+        if self.current_char() == 'e' || self.current_char() == 'E' {
+            num_str.push(self.advance());
+            if self.current_char() == '+' || self.current_char() == '-' {
                 num_str.push(self.advance());
-                if let Some('+') | Some('-') = self.peek()
-                {
-                    num_str.push(self.advance());
-                }
-                while self.current_char().is_ascii_digit()
-                {
-                    num_str.push(self.advance());
-                }
             }
-            match num_str.parse::<f64>()
-            {
+            let mut has_exp_digits = false;
+            while self.current_char().is_ascii_digit() {
+                has_exp_digits = true;
+                num_str.push(self.advance());
+            }
+            if !has_exp_digits {
+                return Err(LexerError::InvalidNumber(num_str, self.line));
+            }
+        }
+
+        if num_str.contains('.') || num_str.contains('e') || num_str.contains('E') {
+            match num_str.parse::<f64>() {
                 Ok(n) => Ok(Token::new(TokenType::Double(n), num_str, self.line)),
                 Err(_) => Err(LexerError::InvalidNumber(num_str, self.line)),
             }
-        }
-        else if let Some('e') | Some('E') = self.peek()
-        {
-            num_str.push(self.advance());
-            if let Some('+') | Some('-') = self.peek()
-            {
-                num_str.push(self.advance());
-            }
-            while self.current_char().is_ascii_digit()
-            {
-                num_str.push(self.advance());
-            }
-            match num_str.parse::<f64>()
-            {
-                Ok(n) => Ok(Token::new(TokenType::Double(n), num_str, self.line)),
-                Err(_) => Err(LexerError::InvalidNumber(num_str, self.line)),
-            }
-        }
-        else
-        {
-            match num_str.parse::<i64>()
-            {
+        } else {
+            match num_str.parse::<i64>() {
                 Ok(n) => Ok(Token::new(TokenType::Int(n), num_str, self.line)),
                 Err(_) => Err(LexerError::InvalidNumber(num_str, self.line)),
             }
@@ -205,7 +187,7 @@ impl Lexer
         {
             str.push(self.advance());
         }
-        if let Some(keyword) = self.keywords.get(&str.to_lowercase())
+        if let Some(keyword) = self.keywords.get(&str)
         {
             Ok(Token::new(TokenType::Keyword(keyword.clone()), str, self.line))
         }

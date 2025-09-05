@@ -1,6 +1,6 @@
-use crate::lexer::token::{Keyword, Token, TokenType};
+use crate::lexer::token::*;
 use std::fmt;
-use crate::parser::ast::{Expr, Literal, Stmt, VarType};
+use crate::parser::ast::{Expr, Literal, Program, Stmt, VarType};
 use crate::parser::type_resolver::{resolve_simple_type,};
 
 pub struct Parser
@@ -9,6 +9,7 @@ pub struct Parser
     current: usize,
 }
 
+#[derive(Debug)]
 pub enum ParsingError
 {
     UnexpectedToken(Token),
@@ -118,6 +119,10 @@ impl Parser
 
         Ok(statements)
     }
+    pub fn parse_all(&mut self)->Result<Program, ParsingError>
+    {
+        self.parse_program()
+    }
     fn parse_statement(&mut self) ->Result<Box<Stmt>,ParsingError>
     {
 
@@ -137,23 +142,30 @@ impl Parser
     {
         self.parse_assigment().or_else(|_|self.parse_variable_declaration())
     }
-    fn parse_variable_declaration(&mut self)->Result<Box<Stmt>,ParsingError>
-    {
-
-        let  var_type = self.current_token().ok_or(ParsingError::EndOfInput)?.clone();
+    fn parse_variable_declaration(&mut self) -> Result<Box<Stmt>, ParsingError> {
+        let var_type_token = self.current_token().ok_or(ParsingError::EndOfInput)?.clone();
         self.advance();
-        let var_type = self.parse_type_with_parameters(&var_type)?;
+        let var_type = self.parse_type_with_parameters(&self.previous().clone())?;
 
-         self.match_tokens(&[TokenType::ColonColon]);
+        self.consume(TokenType::ColonColon, "Expected '::' after type in variable declaration".to_string())?;
 
-        if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
-        {
-            return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+        let mut var_names = Vec::new();
+        loop {
+            if !self.match_tokens(&[TokenType::Identifier(String::from(""))]) {
+                return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+            }
+            var_names.push(self.previous().clone().lexeme);
+
+
+            if !self.match_tokens(&[TokenType::Comma]) {
+                break;
+            }
         }
-        let var_name = self.previous().clone();
 
-        let declaration = Stmt::VarDeclare{ var_type: var_type, name: var_name.lexeme };
+
+        let declaration = Stmt::VarDeclare { var_type, name: var_names[0].clone() };
         Ok(Box::new(declaration))
+
     }
 
     fn parse_assigment(&mut self)->Result<Box<Stmt>,ParsingError>
@@ -256,6 +268,23 @@ impl Parser
             return Ok(Box::new(expr));
         }
         self.primary()
+    }
+    fn parse_program(&mut self) -> Result<Program, ParsingError>
+    {
+        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM'".to_string())?;
+        self.consume(TokenType::Identifier(String::from("")), "Expected program name".to_string())?;
+        let mut program = Program::new(self.previous().clone().lexeme, Vec::new());
+
+        while !self.is_at_end()
+        {
+
+            program.stmts.push(*self.parse_statement()?);
+        }
+        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END' to close program".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM' after 'END'".to_string())?;
+        self.consume(TokenType::Identifier(program.name.clone()), "Expected program name after 'END PROGRAM'".to_string())?;
+
+        Ok(program)
     }
     fn primary(&mut self)->Result<Box<Expr>,ParsingError>
     {

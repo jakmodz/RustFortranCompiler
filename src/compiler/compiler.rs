@@ -48,11 +48,11 @@ impl Compiler
     pub fn compile(&mut self,program:Program) -> anyhow::Result<()>
     {
         todo!();
-        for stmt in program.stmts
-        {
-            self.compile_stmt()?;
-        }
-        Ok(())
+        // for stmt in program.stmts
+        // {
+        //     self.compile_stmt()?;
+        // }
+        // Ok(())
     }
     fn compile_stmt(&mut self,stmt: Stmt)-> anyhow::Result<()>
     {

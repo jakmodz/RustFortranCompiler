@@ -31,12 +31,22 @@ pub enum Stmt
 
 
 }
+#[derive(Debug)]
 pub struct Program
 {
     pub stmts: Vec<Stmt>,
     pub name: String
 }
-
+impl Program
+{
+    pub fn new(name:String,stmts:Vec<Stmt>) -> Program
+    {
+        Self{
+            stmts,
+            name
+        }
+    }
+}
 #[derive(Debug,Clone)]
 pub enum VarType
 {

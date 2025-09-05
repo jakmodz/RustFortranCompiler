@@ -25,22 +25,24 @@ fn run_file(_file_path: &str)
 
     let mut parser = Parser::new(tokens);
 
-    match parser.parse()
-    {
-        Ok(expr) => println!("Ast: {:#?}", expr),
-        Err(e) => eprintln!("Error during parsing: {}", e),
-    }
-    let c = Compiler::new("warkusz").unwrap();
-    let expr = Expr::Literal {
-        value: Literal::Int(42)
-    };
+    let pr  = parser.parse_all().unwrap();
+    println!("{:#?}",pr);
+    // match parser.parse()
+    // {
+    //     Ok(expr) => println!("Ast: {:#?}", expr),
+    //     Err(e) => eprintln!("Error during parsing: {}", e),
+    // }
+    // let c = Compiler::new("warkusz").unwrap();
+    // let expr = Expr::Literal {
+    //     value: Literal::Int(42)
+    // };
 
 }
 
 
 fn main()
 {
-    todo!("parsing main program");
+    
     let args: Vec<String> = env::args().collect();
     // if args.len() != 2
     // {
