@@ -1,8 +1,3 @@
 PROGRAM warkusz
-INTEGER :: a = "wa"
-
-
-
-a = 5
-
+INTEGER :: i
 END PROGRAM warkusz

@@ -1,6 +1,5 @@
 use crate::lexer::token::{Token,TokenType,Keyword};
 use std::collections::HashMap;
-use std::f32::consts::E;
 
 pub enum LexerError
 {
@@ -43,32 +42,32 @@ impl Lexer
         let mut keywords = HashMap::new();
         keywords.insert("PROGRAM".to_string(), Keyword::Program);
         keywords.insert("END".to_string(), Keyword::End);
-        keywords.insert("module".to_string(), Keyword::Module);
-        keywords.insert("use".to_string(), Keyword::Use);
-        keywords.insert("contains".to_string(), Keyword::Contains);
-        keywords.insert("subroutine".to_string(), Keyword::Subroutine);
-        keywords.insert("function".to_string(), Keyword::Function);
-        keywords.insert("return".to_string(), Keyword::Return);
+        keywords.insert("MODULE".to_string(), Keyword::Module);
+        keywords.insert("USE".to_string(), Keyword::Use);
+        keywords.insert("CONTAINS".to_string(), Keyword::Contains);
+        keywords.insert("SUBROUTINE".to_string(), Keyword::Subroutine);
+        keywords.insert("FUNCTION".to_string(), Keyword::Function);
+        keywords.insert("RETURN".to_string(), Keyword::Return);
         keywords.insert("INTEGER".to_string(), Keyword::Integer);
-        keywords.insert("real".to_string(), Keyword::Real);
-        keywords.insert("doubleprecision".to_string(), Keyword::DoublePrecision);
-        keywords.insert("complex".to_string(), Keyword::Complex);
-        keywords.insert("logical".to_string(), Keyword::Logical);
-        keywords.insert("character".to_string(), Keyword::Character);
+        keywords.insert("REAL".to_string(), Keyword::Real);
+        keywords.insert("DOUBLEPRECISION".to_string(), Keyword::DoublePrecision);
+        keywords.insert("COMPLEX".to_string(), Keyword::Complex);
+        keywords.insert("LOGICAL".to_string(), Keyword::Logical);
+        keywords.insert("CHARACTER".to_string(), Keyword::Character);
         keywords.insert("PARAMETER".to_string(), Keyword::Parameter);
-        keywords.insert("dimension".to_string(), Keyword::Dimension);
-        keywords.insert("allocatable".to_string(), Keyword::Allocatable);
-        keywords.insert("pointer".to_string(), Keyword::Pointer);
-        keywords.insert("target".to_string(), Keyword::Target);
-        keywords.insert("intent".to_string(), Keyword::Intent);
-        keywords.insert("in".to_string(), Keyword::In);
-        keywords.insert("out".to_string(), Keyword::Out);
-        keywords.insert("inout".to_string(), Keyword::Inout);
-        keywords.insert("optional".to_string(), Keyword::Optional);
-        keywords.insert("if".to_string(), Keyword::If);
-        keywords.insert("then".to_string(), Keyword::Then);
-        keywords.insert("else".to_string(), Keyword::Else);
-        keywords.insert("elseif".to_string(), Keyword::ElseIf);
+        keywords.insert("DIMENSION".to_string(), Keyword::Dimension);
+        keywords.insert("ALLOCATABLE".to_string(), Keyword::Allocatable);
+        keywords.insert("POINTER".to_string(), Keyword::Pointer);
+        keywords.insert("TARGET".to_string(), Keyword::Target);
+        keywords.insert("INTENT".to_string(), Keyword::Intent);
+        keywords.insert("IN".to_string(), Keyword::In);
+        keywords.insert("OUT".to_string(), Keyword::Out);
+        keywords.insert("INOUT".to_string(), Keyword::Inout);
+        keywords.insert("OPTIONAL".to_string(), Keyword::Optional);
+        keywords.insert("IF".to_string(), Keyword::If);
+        keywords.insert("THEN".to_string(), Keyword::Then);
+        keywords.insert("ELSE".to_string(), Keyword::Else);
+        keywords.insert("ELSEIF".to_string(), Keyword::ElseIf);
         Self {
             source: source.chars().collect(),
             keywords,
@@ -187,7 +186,8 @@ impl Lexer
         {
             str.push(self.advance());
         }
-        if let Some(keyword) = self.keywords.get(&str)
+        let upper_str = str.to_ascii_uppercase();
+        if let Some(keyword) = self.keywords.get(&upper_str)
         {
             Ok(Token::new(TokenType::Keyword(keyword.clone()), str, self.line))
         }

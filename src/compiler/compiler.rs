@@ -10,10 +10,11 @@ use std::collections::HashMap;
 use std::io::Write;
 use cranelift_codegen::Context;
 use target_lexicon::Triple;
-use crate::lexer::token::TokenType;
+use crate::Common::type_resolver::fortran_type_to_cranelift;
+use crate::compiler::runtime_error::RuntimeError;
 use crate::parser::program_unit::*;
 use crate::parser::ast::*;
-use crate::parser::parser::Parser;
+
 
 pub struct Compiler
 {
@@ -23,6 +24,8 @@ pub struct Compiler
     ctx: Context,
     builder_context: FunctionBuilderContext,
     next_func_id: usize,
+
+    variables: HashMap<String, Variable>,
 }
 
 impl Compiler
@@ -52,217 +55,271 @@ impl Compiler
             ctx,
             builder_context: FunctionBuilderContext::new(),
             next_func_id: 0,
+            variables: HashMap::new(),
         })
     }
-    pub fn compile(&mut self,parser: Parser)-> anyhow::Result<()>
+
+    pub fn compile(&mut self,program:Vec<ProgramUnit>) -> anyhow::Result<()>
     {
-        //parser.
+        for program_unit in program
+        {
+            self.compile_program_unit(program_unit)?;
+        }
         Ok(())
     }
-    fn compile_main(&mut self)-> anyhow::Result<FuncId>
+    pub fn compile_program_unit(&mut self,program_unit:ProgramUnit) -> anyhow::Result<()>
     {
-        let mut sig = self.module.make_signature();
-        sig.returns.push(AbiParam::new(types::I32));
-        let mut main_id = self.module.declare_function("main",Linkage::Export, &sig)?;
+        match program_unit
+        {
+            ProgramUnit::Program { program} =>
+                {
+                    self.compile_main_function(program)?;
+                }
+        }
+        Ok(())
+    }
+    fn compile_main_function(&mut self, program: Program) -> anyhow::Result<FuncId>
+    {
         self.ctx.clear();
 
-        self.ctx.func.signature = sig;
-        {
-            let mut builder = FunctionBuilder::new(&mut self.ctx.func,&mut self.builder_context);
+        let mut sig = self.module.make_signature();
+        sig.returns.push(AbiParam::new(types::I32));
 
-            let block = builder.create_block();
-            builder.append_block_params_for_function_returns(block);
-            builder.switch_to_block(block);
-            builder.seal_block(block);
+        let main_id = self.module.declare_function("main", Linkage::Export, &sig)?;
+
+        self.ctx.func.signature = sig;
+
+        {
+            let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
+            let entry_block = builder.create_block();
+            builder.switch_to_block(entry_block);
+            builder.seal_block(entry_block);
+
+
+            self.variables.clear();
+
+            for decl in program.declarations
+            {
+                Self::compile_decl_helper(decl, &mut builder, &mut self.variables, &mut self.module)?;
+            }
+
+            for stmt in program.stmts
+            {
+                Self::compile_stmt_helper(stmt, &mut builder, &mut self.variables, &mut self.module)?;
+            }
 
 
             let return_value = builder.ins().iconst(types::I32, 0);
             builder.ins().return_(&[return_value]);
 
+
+            builder.seal_all_blocks();
             builder.finalize();
         }
-        Ok(main_id)
 
+        self.module.define_function(main_id, &mut self.ctx)?;
+        self.module.clear_context(&mut self.ctx);
+
+        Ok(main_id)
     }
-    pub fn compile_program_unit(&mut self,program_unit:ProgramUnit) -> anyhow::Result<()>
-    {
-        self.compile_main();
-        match program_unit
-        {
-            ProgramUnit::Program { program} =>
-                {
-                    self.compile_program(program)?;
-                }
-        }
-        Ok(())
-    }
-    fn compile_decl(&mut self,decl: Declaration) -> anyhow::Result<()>
+
+
+    fn compile_decl_helper(
+        decl: Declaration,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
     {
         match decl
         {
             Declaration::Variable {name,var_type,initial_value} =>
                 {
+                    let var = Variable::new(variables.len());
+                    variables.insert(name.clone(), var);
+                    builder.declare_var(var, fortran_type_to_cranelift(&var_type));
 
+                    if let Some(value) = initial_value
+                    {
+                        let val = Self::compile_expr_helper(builder, &value, variables, module)?;
+                        builder.def_var(var, val);
+                    }
                 }
-            Declaration::Parameter {name,value} =>
+            Declaration::Parameter {name,var_type,value}=>
                 {
+                    let var = Variable::new(variables.len());
+                    variables.insert(name.clone(), var);
+                    builder.declare_var(var, fortran_type_to_cranelift(&var_type));
 
+                    let val = Self::compile_expr_helper(builder, &value, variables, module)?;
+                    builder.def_var(var, val);
                 }
         }
         Ok(())
     }
-    fn compile_program(&mut self,program:Program) -> anyhow::Result<()>
+
+    fn declare_variable(&mut self,name:String,var_type: VarType,expr: Option<Expr>,builder: &mut FunctionBuilder)-> anyhow::Result<()>
     {
-        for decl in program.declarations
+        let var = Variable::new(self.variables.len());
+        self.variables.insert(name.clone(), var);
+        builder.declare_var(var,fortran_type_to_cranelift(&var_type));
+        if  let Some(value) = expr
         {
-            self.compile_decl(decl)?;
-        }
-        for stmt in program.stmts
-        {
-            self.compile_stmt(stmt)?;
+            let val = Self::compile_expr_helper(builder, &value, &mut self.variables, &mut self.module)?;
+            builder.def_var(var,val)
         }
         Ok(())
     }
-    fn compile_stmt(&mut self,stmt: Stmt)-> anyhow::Result<()>
+
+
+    fn compile_stmt_helper(
+        stmt: Stmt,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
     {
         match stmt
         {
-
             Stmt::Assignment { expr,var_name } =>
                 {
-                    todo!()
+                    let value = Self::compile_expr_helper(builder, &expr.as_ref().clone(), variables, module)?;
+                    if  let Some(var) = variables.get(&var_name)
+                    {
+                        builder.def_var(*var, value);
+                    }
+                    else
+                    {
+                        return Err(RuntimeError::NotDefinedVar(var_name).into());
+                    }
+
                 }
             Stmt::Print { expr } =>
                 {
                     todo!()
                 }
             Stmt::If {cond,then} =>
-            {
-                todo!()
-            }
+                {
+                    todo!()
+                }
         }
+        Ok(())
     }
- 
-    pub fn compile_expr(
-        &mut self,
+
+
+
+
+    fn compile_expr_helper(
         builder: &mut FunctionBuilder,
         expr: &Expr,
+        variables: &mut HashMap<String, Variable>,
+        module: &mut ObjectModule
     ) -> anyhow::Result<Value>
     {
         match expr
         {
             Expr::Literal { value } =>
-            {
-                match value
                 {
-                    Literal::Int(i) =>
+                    match value
                     {
-                        Ok(builder.ins().iconst(types::I32, *i as i64))
-                    }
-                    Literal::Real(f) =>
-                    {
-                        Ok(builder.ins().f32const(*f))
-                    }
-                    Literal::Double(d) =>
-                    {
-                        Ok(builder.ins().f64const(*d))
-                    }
-                    Literal::Character(s) =>
-                    {
-                        let string_data = s.as_bytes();
-                        let data_id = self.module.declare_data("string_data", Linkage::Local, false, false)?;
-                        let mut data_desc = cranelift_module::DataDescription::new();
-                        data_desc.define(string_data.to_vec().into_boxed_slice());
-                        self.module.define_data(data_id, &data_desc)?;
+                        Literal::Int(i) =>
+                            {
+                                Ok(builder.ins().iconst(types::I32, *i as i64))
+                            }
+                        Literal::Real(f) =>
+                            {
+                                Ok(builder.ins().f32const(*f))
+                            }
+                        Literal::Double(d) =>
+                            {
+                                Ok(builder.ins().f64const(*d))
+                            }
+                        Literal::Character(s) =>
+                            {
+                                let string_data = s.as_bytes();
+                                let data_id = module.declare_data("string_data", Linkage::Local, false, false)?;
+                                let mut data_desc = cranelift_module::DataDescription::new();
+                                data_desc.define(string_data.to_vec().into_boxed_slice());
+                                module.define_data(data_id, &data_desc)?;
 
-                        let global_value = self.module.declare_data_in_func(data_id, builder.func);
-                        Ok(builder.ins().global_value(types::I64, global_value))
-                    }
-                    Literal::Logical(bool) =>
-                        {
-                            Ok(builder.ins().iconst(types::I32, *bool as i64))
-                        }
+                                let global_value = module.declare_data_in_func(data_id, builder.func);
+                                Ok(builder.ins().global_value(types::I64, global_value))
+                            }
+                        Literal::Logical(bool) =>
+                            {
+                                Ok(builder.ins().iconst(types::I32, *bool as i64))
+                            }
 
+                    }
                 }
-            }
             Expr::BinaryOp { op, left, right } =>
-            {
-                match op.string()
                 {
-                    "+" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().iadd(left_val, right_val))
-                        }
-                    "-" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().isub(left_val, right_val))
-                        }
-                    "*" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().imul(left_val, right_val))
-                        }
-                    "/" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().sdiv(left_val, right_val))
-                        }
-                    "==" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::Equal, left_val, right_val))
-                        }
-                    ">=" =>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::SignedGreaterThan, left_val, right_val))
-                        }
-                    "<="=>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::SignedLessThan, left_val, right_val))
-                        }
-                    ">"=>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::SignedGreaterThan, left_val, right_val))
-                        }
-                    "<"=>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::SignedLessThan, left_val, right_val))
-                        }
-                    "/="=>
-                        {
-                            let left_val = self.compile_expr(builder, left)?;
-                            let right_val = self.compile_expr(builder, right)?;
-                            Ok(builder.ins().icmp(IntCC::NotEqual, left_val, right_val))
-                        }
-                    _=> anyhow::bail!("uknown binary operator"),
+                    let left_val = Self::compile_expr_helper(builder, left, variables, module)?;
+                    let right_val = Self::compile_expr_helper(builder, right, variables, module)?;
+                    match op.string()
+                    {
+                        "+" =>
+                            {
+                                Ok(builder.ins().iadd(left_val, right_val))
+                            }
+                        "-" =>
+                            {
+                                Ok(builder.ins().isub(left_val, right_val))
+                            }
+                        "*" =>
+                            {
+                                Ok(builder.ins().imul(left_val, right_val))
+                            }
+                        "/" =>
+                            {
+                                Ok(builder.ins().sdiv(left_val, right_val))
+                            }
+                        "==" =>
+                            {
+                                Ok(builder.ins().icmp(IntCC::Equal, left_val, right_val))
+                            }
+                        ">=" =>
+                            {
+                                Ok(builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val))
+                            }
+                        "<="=>
+                            {
+                                Ok(builder.ins().icmp(IntCC::SignedLessThanOrEqual, left_val, right_val))
+                            }
+                        ">"=>
+                            {
+                                Ok(builder.ins().icmp(IntCC::SignedGreaterThan, left_val, right_val))
+                            }
+                        "<"=>
+                            {
+                                Ok(builder.ins().icmp(IntCC::SignedLessThan, left_val, right_val))
+                            }
+                        "/="=>
+                            {
+                                Ok(builder.ins().icmp(IntCC::NotEqual, left_val, right_val))
+                            }
+                        _=> anyhow::bail!("unknown binary operator"),
+                    }
                 }
-            }
             Expr::UnaryOp { op, expr } =>
-            {
-                todo!()
-            }
+                {
+                    todo!()
+                }
             Expr::Grouping { expr} =>
-            {
-                self.compile_expr(builder, expr)
-            }
-            Expr::Variable { name } => {
-                todo!()
-            }
+                {
+                    Self::compile_expr_helper(builder, expr, variables, module)
+                }
+            Expr::Variable { name } =>
+                {
+                    if let Some(var) = variables.get(name)
+                    {
+                        Ok(builder.use_var(*var))
+                    }
+                    else
+                    {
+                        Err(RuntimeError::NotDefinedVar(name.clone()).into())
+                    }
+                }
         }
 
     }

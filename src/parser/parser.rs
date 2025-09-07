@@ -2,7 +2,7 @@ use crate::lexer::token::*;
 use crate::parser::parsing_error::ParsingError;
 use crate::parser::ast::{Declaration, Expr, Literal, Stmt, VarType};
 use crate::parser::program_unit::*;
-use crate::parser::type_resolver::{resolve_simple_type,};
+use crate::Common::type_resolver::resolve_simple_type;
 
 pub struct Parser
 {
@@ -277,7 +277,7 @@ impl Parser
                 if self.check_keyword(Keyword::Parameter)
                 {
                     self.advance();
-                    return self.parse_parameter_declaration()
+                    return self.parse_parameter_declaration(var_type)
                 }
 
             }
@@ -322,7 +322,7 @@ impl Parser
         }
 
     }
-    fn parse_parameter_declaration(&mut self)->Result<Declaration,ParsingError>
+    fn parse_parameter_declaration(&mut self,var_type: VarType)->Result<Declaration,ParsingError>
     {
 
         let has_double_colon = self.match_tokens(&[TokenType::ColonColon]);
@@ -335,7 +335,7 @@ impl Parser
         self.consume(TokenType::Assign,"Expected '=' in parameter declaration".to_string())?;
         let value = self.parse_expression()?;
         let v = value.as_ref().clone();
-        Ok(Declaration::Parameter {name:var_name,value: v })
+        Ok(Declaration::Parameter {name:var_name,var_type,value: v })
     }
     fn parse_comparison(&mut self)->Result<Box<Expr>,ParsingError>
     {

@@ -32,6 +32,7 @@ pub enum Declaration
     Parameter
     {
         name: String,
+        var_type: VarType,
         value: Expr,
     }
 }
