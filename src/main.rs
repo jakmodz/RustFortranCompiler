@@ -6,7 +6,7 @@ use crate::lexer::lexer::Lexer;
 use crate::parser::parser::{Parser};
 use std::env;
 use std::fs;
-use crate::compiler::compiler::Compiler;
+use crate::compiler::compiler::{Compiler,generate_object_file};
 use crate::parser::ast::{Expr,Literal};
 
 fn run_file(_file_path: &str)
@@ -32,17 +32,15 @@ fn run_file(_file_path: &str)
     //     Ok(expr) => println!("Ast: {:#?}", expr),
     //     Err(e) => eprintln!("Error during parsing: {}", e),
     // }
-    // let c = Compiler::new("warkusz").unwrap();
-    // let expr = Expr::Literal {
-    //     value: Literal::Int(42)
-    // };
-
+    let mut c = Compiler::new("warkusz").unwrap();
+    c.compile_program_unit(pr);
+        generate_object_file(c,"warkusz.obj").unwrap();
 }
 
 
 fn main()
 {
-    
+    //todo!("add and or and logical binary parsing and start compiler");
     let args: Vec<String> = env::args().collect();
     // if args.len() != 2
     // {

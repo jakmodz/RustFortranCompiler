@@ -8,9 +8,33 @@ pub enum Literal
     Real(f32),
     Double(f64),
     Character(String),
+    Logical(bool)
 }
+#[derive(Debug,Clone)]
+pub enum VarType
+{
+    Integer,
+    Real,
+    Logical,
+    Complex,
+    Character{len:usize}
 
-
+}
+#[derive(Debug, Clone)]
+pub enum Declaration
+{
+    Variable 
+    {
+        name: String,
+        var_type: VarType,
+        initial_value: Option<Expr>,
+    },
+    Parameter
+    {
+        name: String,
+        value: Expr,
+    }
+}
 #[derive(Debug,Clone)]
 pub enum Expr
 {
@@ -24,36 +48,10 @@ pub enum Expr
 #[derive(Debug,Clone)]
 pub enum Stmt
 {
-    VarDeclare{ var_type:VarType,name:String},
     Assignment{var_name:String,expr:Box<Expr>},
 
     Print{expr:Box<Expr>},
-
-
-}
-#[derive(Debug)]
-pub struct Program
-{
-    pub stmts: Vec<Stmt>,
-    pub name: String
-}
-impl Program
-{
-    pub fn new(name:String,stmts:Vec<Stmt>) -> Program
-    {
-        Self{
-            stmts,
-            name
-        }
-    }
-}
-#[derive(Debug,Clone)]
-pub enum VarType
-{
-    Integer,
-    Real,
-    Logical,
-    Complex,
-    Character{len:usize}
+    If{cond:Box<Expr>,then:Box<Stmt>},
 
 }
+

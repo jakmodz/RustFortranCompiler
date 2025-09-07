@@ -1,6 +1,8 @@
 PROGRAM warkusz
-INTEGER a
-a = 1
-b = 2
-c = a + b
+INTEGER :: a = "wa"
+
+
+
+a = 5
+
 END PROGRAM warkusz

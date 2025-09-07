@@ -8,3 +8,5 @@ Well, i recently started my journey with compiler/interpreters and this kind of 
 
 
 ## RoadMap
+**support basic fortran 90 features**
+**make it usable to run simple fortran programs**

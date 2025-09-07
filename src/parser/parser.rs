@@ -1,6 +1,7 @@
 use crate::lexer::token::*;
-use std::fmt;
-use crate::parser::ast::{Expr, Literal, Program, Stmt, VarType};
+use crate::parser::parsing_error::ParsingError;
+use crate::parser::ast::{Declaration, Expr, Literal, Stmt, VarType};
+use crate::parser::program_unit::*;
 use crate::parser::type_resolver::{resolve_simple_type,};
 
 pub struct Parser
@@ -9,26 +10,6 @@ pub struct Parser
     current: usize,
 }
 
-#[derive(Debug)]
-pub enum ParsingError
-{
-    UnexpectedToken(Token),
-    SyntaxError(Token,String),
-    EndOfInput,
-}
-
-impl std::fmt::Display for ParsingError
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>)->fmt::Result
-    {
-        match self
-        {
-            ParsingError::UnexpectedToken(token) => write!(f, "Unexpected token: {}", token),
-            ParsingError::SyntaxError(token,msg) => write!(f, "error at {} message:{} ",token.line ,msg),
-            ParsingError::EndOfInput => write!(f, "Unexpected end of input"),
-        }
-    }
-}
 
 impl Parser
 {
@@ -57,6 +38,36 @@ impl Parser
             None
         }
     }
+    fn check_keyword(&mut self, keyword: Keyword) -> bool
+    {
+        if let Some(token) = self.current_token()
+        {
+            matches!(token.token_type.clone(), TokenType::Keyword(k) if k == keyword)
+        }
+        else
+        {
+            false
+        }
+    }
+    fn is_declaration_keyword(&mut self) ->bool
+    {
+        if let Some(token) = self.current_token()
+        {
+            matches!(token.token_type.clone(),
+                TokenType::Keyword(Keyword::Integer) |
+                TokenType::Keyword(Keyword::Real) |
+                TokenType::Keyword(Keyword::DoublePrecision) |
+                TokenType::Keyword(Keyword::Complex) |
+                TokenType::Keyword(Keyword::Logical) |
+                TokenType::Keyword(Keyword::Character)
+            )
+        }
+        else
+        {
+            false
+        }
+    }
+
     fn current_token(& self) ->Option<&Token>
     {
         if self.is_at_end()
@@ -99,6 +110,7 @@ impl Parser
         }
         false
     }
+
     pub fn parse(&mut self)->Result<Vec<Box<Stmt>>, ParsingError>
     {
         let mut statements = Vec::new();
@@ -119,54 +131,34 @@ impl Parser
 
         Ok(statements)
     }
-    pub fn parse_all(&mut self)->Result<Program, ParsingError>
+    pub fn get_var_type(&mut self)->Result<VarType,ParsingError>
+    {
+        let var_type_token = self.current_token().ok_or(ParsingError::EndOfInput)?.clone();
+        self.advance();
+         self.parse_type_with_parameters(&self.previous().clone())
+    }
+    pub fn parse_all(&mut self)->Result<ProgramUnit, ParsingError>
     {
         self.parse_program()
     }
     fn parse_statement(&mut self) ->Result<Box<Stmt>,ParsingError>
     {
 
-        if  self.match_tokens(&[TokenType::Keyword(Keyword::If)])
-        {
-            //todo!("if statement parsing not implemented yet");
-        }
-        else if self.match_tokens(&[TokenType::Keyword(Keyword::Print)])
+        if self.check_keyword(Keyword::Print)
         {
             self.parse_print()?;
         }
-
-        self.parse_declaration()
-    }
-
-    fn parse_declaration(&mut self)->Result<Box<Stmt>,ParsingError>
-    {
-        self.parse_assigment().or_else(|_|self.parse_variable_declaration())
-    }
-    fn parse_variable_declaration(&mut self) -> Result<Box<Stmt>, ParsingError> {
-        let var_type_token = self.current_token().ok_or(ParsingError::EndOfInput)?.clone();
-        self.advance();
-        let var_type = self.parse_type_with_parameters(&self.previous().clone())?;
-
-        self.consume(TokenType::ColonColon, "Expected '::' after type in variable declaration".to_string())?;
-
-        let mut var_names = Vec::new();
-        loop {
-            if !self.match_tokens(&[TokenType::Identifier(String::from(""))]) {
-                return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
-            }
-            var_names.push(self.previous().clone().lexeme);
-
-
-            if !self.match_tokens(&[TokenType::Comma]) {
-                break;
-            }
+        else if self.check_keyword(Keyword::If)
+        {
+            todo!("gustyn")
         }
 
 
-        let declaration = Stmt::VarDeclare { var_type, name: var_names[0].clone() };
-        Ok(Box::new(declaration))
 
+        self.parse_assigment()
     }
+
+
 
     fn parse_assigment(&mut self)->Result<Box<Stmt>,ParsingError>
     {
@@ -185,6 +177,45 @@ impl Parser
         let expr = self.parse_expression()?;
         let print_stmt = Stmt::Print{expr};
          Ok(Box::new(print_stmt))
+    }
+    fn parse_program(&mut self) -> Result<ProgramUnit, ParsingError>
+    {
+        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM'".to_string())?;
+
+        if !matches!(self.current_token().unwrap().token_type, TokenType::Identifier(_))
+        {
+            return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+        }
+
+        self.advance();
+        let program_name = self.previous().lexeme.clone();
+        let mut program = Program::new(program_name.clone(), Vec::new(),Vec::new());
+
+
+        while !self.is_at_end()
+        {
+            if let Some(token) = self.current_token()
+            {
+
+                if matches!(token.token_type, TokenType::Keyword(Keyword::End))
+                {
+                    break;
+                }
+                if self.is_declaration_keyword()
+                {
+                    let declaration = self.parse_declaration()?;
+                    program.declarations.push(declaration);
+                    continue;
+                }
+            }
+            program.stmts.push(*self.parse_statement()?);
+        }
+
+        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END' to close program".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM' after 'END'".to_string())?;
+        self.consume(TokenType::Identifier(program_name), "Expected program name after 'END PROGRAM'".to_string())?;
+
+        Ok(ProgramUnit::Program {program})
     }
     fn parse_type_with_parameters(&mut self,token:&Token)->Result<VarType,ParsingError>
     {
@@ -215,6 +246,10 @@ impl Parser
                     }
                     Ok(VarType::Character{len})
                 }
+            TokenType::Keyword(Keyword::Complex) =>
+                {
+                    Ok(VarType::Complex)
+                }
             _ => Err(ParsingError::UnexpectedToken(token.clone()))
         }
     }
@@ -230,6 +265,77 @@ impl Parser
 
         }
         Ok(node)
+    }
+
+    fn parse_declaration(&mut self)->Result<Declaration,ParsingError>
+    {
+        if self.is_declaration_keyword()
+        {
+            let var_type = self.get_var_type()?;
+            if self.match_tokens(&[TokenType::Comma])
+            {
+                if self.check_keyword(Keyword::Parameter)
+                {
+                    self.advance();
+                    return self.parse_parameter_declaration()
+                }
+
+            }
+           return self.parse_variable_declaration(var_type);
+        }
+
+        Err(ParsingError::EndOfInput)
+    }
+    fn parse_variable_declaration(&mut self,var_type:VarType)->Result<Declaration,ParsingError>
+    {
+
+        let has_double_colon = self.match_tokens(&[TokenType::ColonColon]);
+
+        let mut var_names = Vec::new();
+        loop
+        {
+            if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
+            {
+                return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+            }
+            var_names.push(self.previous().clone().lexeme);
+            if !self.match_tokens(&[TokenType::Comma])
+            {
+                break;
+            }
+        }
+        let initial_value = if self.match_tokens(&[TokenType::Assign])
+        {
+            Some(*self.parse_expression()?)
+        }
+        else
+        {
+            None
+        };
+        Ok(Declaration::Variable {name:var_names[0].clone(),var_type,initial_value})
+    }
+    fn consume_keyword(&mut self,attribute:Keyword)
+    {
+        if self.check_keyword(attribute)
+        {
+            self.advance();
+        }
+
+    }
+    fn parse_parameter_declaration(&mut self)->Result<Declaration,ParsingError>
+    {
+
+        let has_double_colon = self.match_tokens(&[TokenType::ColonColon]);
+        if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
+        {
+            return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+        }
+        let var_name =self.previous().lexeme.clone();
+
+        self.consume(TokenType::Assign,"Expected '=' in parameter declaration".to_string())?;
+        let value = self.parse_expression()?;
+        let v = value.as_ref().clone();
+        Ok(Declaration::Parameter {name:var_name,value: v })
     }
     fn parse_comparison(&mut self)->Result<Box<Expr>,ParsingError>
     {
@@ -247,7 +353,7 @@ impl Parser
     fn term(&mut self)->Result<Box<Expr>,ParsingError>
     {
         let mut node = self.factor()?;
-        while self.match_tokens(&[TokenType::Star, TokenType::Slash,TokenType::Percent])
+        while self.match_tokens(&[TokenType::Star, TokenType::Slash])
         {
             let operator = self.previous().clone();
             let right = self.factor()?;
@@ -269,23 +375,7 @@ impl Parser
         }
         self.primary()
     }
-    fn parse_program(&mut self) -> Result<Program, ParsingError>
-    {
-        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM'".to_string())?;
-        self.consume(TokenType::Identifier(String::from("")), "Expected program name".to_string())?;
-        let mut program = Program::new(self.previous().clone().lexeme, Vec::new());
 
-        while !self.is_at_end()
-        {
-
-            program.stmts.push(*self.parse_statement()?);
-        }
-        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END' to close program".to_string())?;
-        self.consume(TokenType::Keyword(Keyword::Program), "Expected 'PROGRAM' after 'END'".to_string())?;
-        self.consume(TokenType::Identifier(program.name.clone()), "Expected program name after 'END PROGRAM'".to_string())?;
-
-        Ok(program)
-    }
     fn primary(&mut self)->Result<Box<Expr>,ParsingError>
     {
         let mut token =  self.current_token().ok_or(ParsingError::EndOfInput)?.clone();
@@ -313,13 +403,13 @@ impl Parser
             TokenType::Keyword(Keyword::True) =>
                 {
                     self.advance();
-                    let literal = Expr::Literal { value: Literal::Int(1) };
+                    let literal = Expr::Literal { value: Literal::Logical(true) };
                     Ok(Box::new(literal))
                 }
             TokenType::Keyword(Keyword::False) =>
                 {
                     self.advance();
-                    let literal = Expr::Literal { value: Literal::Int(0) };
+                    let literal = Expr::Literal { value: Literal::Logical(false) };
                      Ok(Box::new(literal))
                 }
             TokenType::Character(value) =>

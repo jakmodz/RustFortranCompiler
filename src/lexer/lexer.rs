@@ -55,7 +55,7 @@ impl Lexer
         keywords.insert("complex".to_string(), Keyword::Complex);
         keywords.insert("logical".to_string(), Keyword::Logical);
         keywords.insert("character".to_string(), Keyword::Character);
-        keywords.insert("parameter".to_string(), Keyword::Parameter);
+        keywords.insert("PARAMETER".to_string(), Keyword::Parameter);
         keywords.insert("dimension".to_string(), Keyword::Dimension);
         keywords.insert("allocatable".to_string(), Keyword::Allocatable);
         keywords.insert("pointer".to_string(), Keyword::Pointer);
@@ -356,11 +356,15 @@ impl Lexer
                         if c.is_alphabetic()
                         {
                             op.push(self.advance());
-                        } else if c == '.'
+                        }
+                        else if c == '.'
                         {
                             op.push(self.advance());
+                            op.push(self.advance());
                             break;
-                        } else {
+                        }
+                        else
+                        {
                             break;
                         }
                     }
@@ -371,6 +375,8 @@ impl Lexer
                         ".not." => Ok(Token::new(TokenType::Not, op, self.line)),
                         ".eqv." => Ok(Token::new(TokenType::Eqv, op, self.line)),
                         ".neqv." => Ok(Token::new(TokenType::Neqv, op, self.line)),
+                        ".true." =>Ok(Token::new(TokenType::Keyword(Keyword::True),op,self.line)),
+                        ".false." =>Ok(Token::new(TokenType::Keyword(Keyword::False),op,self.line)),
                         _ => Err(LexerError::UnexpectedCharacter(c, self.line)),
                     }
                 }

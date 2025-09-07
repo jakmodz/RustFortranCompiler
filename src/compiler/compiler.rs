@@ -8,14 +8,20 @@ use cranelift_codegen::settings::{Configurable, Flags};
 
 use std::collections::HashMap;
 use std::io::Write;
+use cranelift_codegen::Context;
 use target_lexicon::Triple;
 use crate::lexer::token::TokenType;
+use crate::parser::program_unit::*;
 use crate::parser::ast::*;
+use crate::parser::parser::Parser;
+
 pub struct Compiler
 {
     module: ObjectModule,
     isa: isa::OwnedTargetIsa,
     functions: HashMap<String, FuncId>,
+    ctx: Context,
+    builder_context: FunctionBuilderContext,
     next_func_id: usize,
 }
 
@@ -28,7 +34,7 @@ impl Compiler
         flag_builder.set("use_colocated_libcalls", "false")?;
 
         let isa_builder = cranelift_codegen::isa::lookup(target.clone())?;
-        let flags = cranelift_codegen::settings::Flags::new(flag_builder); // Don't wrap in another Flags::new()
+        let flags = cranelift_codegen::settings::Flags::new(flag_builder);
         let isa = isa_builder.finish(flags)?;
 
         let obj_builder = ObjectBuilder::new(
@@ -37,31 +43,91 @@ impl Compiler
             cranelift_module::default_libcall_names(),
         )?;
         let module = ObjectModule::new(obj_builder);
-
-        Ok(Self {
+        let ctx = module.make_context();
+        Ok(Self
+        {
             module,
             isa,
             functions: HashMap::new(),
+            ctx,
+            builder_context: FunctionBuilderContext::new(),
             next_func_id: 0,
         })
     }
-    pub fn compile(&mut self,program:Program) -> anyhow::Result<()>
+    pub fn compile(&mut self,parser: Parser)-> anyhow::Result<()>
     {
-        todo!();
-        // for stmt in program.stmts
-        // {
-        //     self.compile_stmt()?;
-        // }
-        // Ok(())
+        //parser.
+        Ok(())
+    }
+    fn compile_main(&mut self)-> anyhow::Result<FuncId>
+    {
+        let mut sig = self.module.make_signature();
+        sig.returns.push(AbiParam::new(types::I32));
+        let mut main_id = self.module.declare_function("main",Linkage::Export, &sig)?;
+        self.ctx.clear();
+
+        self.ctx.func.signature = sig;
+        {
+            let mut builder = FunctionBuilder::new(&mut self.ctx.func,&mut self.builder_context);
+
+            let block = builder.create_block();
+            builder.append_block_params_for_function_returns(block);
+            builder.switch_to_block(block);
+            builder.seal_block(block);
+
+
+            let return_value = builder.ins().iconst(types::I32, 0);
+            builder.ins().return_(&[return_value]);
+
+            builder.finalize();
+        }
+        Ok(main_id)
+
+    }
+    pub fn compile_program_unit(&mut self,program_unit:ProgramUnit) -> anyhow::Result<()>
+    {
+        self.compile_main();
+        match program_unit
+        {
+            ProgramUnit::Program { program} =>
+                {
+                    self.compile_program(program)?;
+                }
+        }
+        Ok(())
+    }
+    fn compile_decl(&mut self,decl: Declaration) -> anyhow::Result<()>
+    {
+        match decl
+        {
+            Declaration::Variable {name,var_type,initial_value} =>
+                {
+
+                }
+            Declaration::Parameter {name,value} =>
+                {
+
+                }
+        }
+        Ok(())
+    }
+    fn compile_program(&mut self,program:Program) -> anyhow::Result<()>
+    {
+        for decl in program.declarations
+        {
+            self.compile_decl(decl)?;
+        }
+        for stmt in program.stmts
+        {
+            self.compile_stmt(stmt)?;
+        }
+        Ok(())
     }
     fn compile_stmt(&mut self,stmt: Stmt)-> anyhow::Result<()>
     {
         match stmt
         {
-            Stmt::VarDeclare { name,var_type } =>
-                {
-                    todo!()
-                }
+
             Stmt::Assignment { expr,var_name } =>
                 {
                     todo!()
@@ -70,6 +136,10 @@ impl Compiler
                 {
                     todo!()
                 }
+            Stmt::If {cond,then} =>
+            {
+                todo!()
+            }
         }
     }
  
@@ -77,11 +147,14 @@ impl Compiler
         &mut self,
         builder: &mut FunctionBuilder,
         expr: &Expr,
-    ) -> anyhow::Result<Value> {
-        match expr {
+    ) -> anyhow::Result<Value>
+    {
+        match expr
+        {
             Expr::Literal { value } =>
             {
-                match value {
+                match value
+                {
                     Literal::Int(i) =>
                     {
                         Ok(builder.ins().iconst(types::I32, *i as i64))
@@ -105,6 +178,10 @@ impl Compiler
                         let global_value = self.module.declare_data_in_func(data_id, builder.func);
                         Ok(builder.ins().global_value(types::I64, global_value))
                     }
+                    Literal::Logical(bool) =>
+                        {
+                            Ok(builder.ins().iconst(types::I32, *bool as i64))
+                        }
 
                 }
             }
@@ -192,9 +269,9 @@ impl Compiler
 
 }
 
-pub fn generate_object_file(module:  ObjectModule,path: &str) -> anyhow::Result<()>
+pub fn generate_object_file(compiler:  Compiler,path: &str) -> anyhow::Result<()>
 {
-    let object =module.finish();
+    let object =compiler.module.finish();
     let object_bytes = object.emit()?;
 
     let mut file = std::fs::File::create(path)?;
