@@ -45,6 +45,7 @@ This project implements a compiler for the Fortran 90/95 programming language, w
 
 - **Lexer**: Tokenizes Fortran source code
 - **Parser**: Builds Abstract Syntax Tree (AST)
+- **Analyzer**: Semantic analysis for Ast
 - **Compiler**: Generates machine code using Cranelift
 - **Code Generation**: Produces object files for linking
 
