@@ -204,8 +204,11 @@ impl Parser
                 }
                 if self.is_declaration_keyword()
                 {
-                    let declaration = self.parse_declaration()?;
-                    program.declarations.push(declaration);
+                    let declarations = self.parse_declaration()?;
+                    for declaration in declarations
+                    {
+                        program.declarations.push(declaration);
+                    }
                     continue;
                 }
             }
@@ -268,8 +271,9 @@ impl Parser
         Ok(node)
     }
 
-    fn parse_declaration(&mut self)->Result<Declaration,ParsingError>
+    fn parse_declaration(&mut self)->Result<Vec<Declaration>,ParsingError>
     {
+
         if self.is_declaration_keyword()
         {
             let var_type = self.get_var_type()?;
@@ -278,7 +282,7 @@ impl Parser
                 if self.check_keyword(Keyword::Parameter)
                 {
                     self.advance();
-                    return self.parse_parameter_declaration(var_type)
+                    return Ok(vec![self.parse_parameter_declaration(var_type)?]);
                 }
 
             }
@@ -287,7 +291,7 @@ impl Parser
 
         Err(ParsingError::EndOfInput)
     }
-    fn parse_variable_declaration(&mut self,var_type:VarType)->Result<Declaration,ParsingError>
+    fn parse_variable_declaration(&mut self,var_type:VarType)->Result<Vec<Declaration>,ParsingError>
     {
 
         let has_double_colon = self.match_tokens(&[TokenType::ColonColon]);
@@ -299,21 +303,31 @@ impl Parser
             {
                 return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
             }
-            var_names.push(self.previous().clone().lexeme);
+            let var_name = self.previous().clone();
+            let initial_value = if self.match_tokens(&[TokenType::Assign])
+            {
+                Some(*self.parse_expression()?)
+            }
+            else
+            {
+                None
+            };
+
+
+            var_names.push((var_name.lexeme, initial_value.clone()));
             if !self.match_tokens(&[TokenType::Comma])
             {
                 break;
             }
         }
-        let initial_value = if self.match_tokens(&[TokenType::Assign])
+
+        let variables = var_names.iter().map(|tup| Declaration::Variable
         {
-            Some(*self.parse_expression()?)
-        }
-        else
-        {
-            None
-        };
-        Ok(Declaration::Variable {name:var_names[0].clone(),var_type,initial_value})
+            name: tup.0.clone(),
+            var_type: var_type.clone(),
+            initial_value: tup.1.clone(),
+        }).collect();
+        Ok(variables)
     }
     fn consume_keyword(&mut self,attribute:Keyword)
     {
