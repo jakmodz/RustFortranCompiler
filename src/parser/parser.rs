@@ -146,7 +146,8 @@ impl Parser
 
         if self.check_keyword(Keyword::Print)
         {
-            self.parse_print()?;
+            self.advance();
+            return self.parse_print();
         }
         else if self.check_keyword(Keyword::If)
         {

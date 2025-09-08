@@ -9,7 +9,7 @@ use std::env;
 use std::fs;
 use crate::compiler::compiler::{Compiler,generate_object_file};
 use crate::parser::ast::{Expr,Literal};
-
+const PATH: &str = "warkusz.obj";
 fn run_file(_file_path: &str)
 {
     let file = fs::read_to_string("test.f90").expect("Unable to read file");
@@ -30,11 +30,12 @@ fn run_file(_file_path: &str)
     println!("{:#?}", pr);
     let mut c = Compiler::new("warkusz").unwrap();
     c.compile(vec![pr]);
-    generate_object_file(c,"warkusz.o").unwrap()
+    generate_object_file(c,PATH).unwrap()
+
 }
 fn main()
 {
-    todo!(check if it compiles to binary and run it);
+    //todo!(check if it compiles to binary and run it);
     let args: Vec<String> = env::args().collect();
     // if args.len() != 2
     // {

@@ -54,9 +54,10 @@ pub enum TokenType
 }
 impl TokenType
 {
-    pub fn string(&self)-> &'static str
+    /// Returns the lexeme for operator and delimiter types, or a descriptive string for others.
+    pub fn lexeme(&self) -> &'static str
     {
-        match  self
+        match self
         {
             TokenType::Character(_) => "Character",
             TokenType::Real(_) => "Real",
@@ -64,33 +65,33 @@ impl TokenType
             TokenType::Int(_) => "Int",
             TokenType::Identifier(_) => "Identifier",
             TokenType::Keyword(_) => "Keyword",
-            TokenType::Plus => "Plus",
-            TokenType::Minus => "Minus",
-            TokenType::Star => "Star",
-            TokenType::Slash => "Slash",
-            TokenType::StarStar => "StarStar",
-            TokenType::Eq => "Eq",
-            TokenType::Ne => "Ne",
-            TokenType::Lt => "Lt",
-            TokenType::Le => "Le",
-            TokenType::Gt => "Gt",
-            TokenType::Ge => "Ge",
-            TokenType::And => "And",
-            TokenType::Or => "Or",
-            TokenType::Not => "Not",
-            TokenType::Eqv => "Eqv",
-            TokenType::Neqv => "Neqv",
-            TokenType::LeftParen => "LeftParen",
-            TokenType::RightParen => "RightParen",
-            TokenType::LeftBracket => "LeftBracket",
-            TokenType::RightBracket => "RightBracket",
-            TokenType::Comma => "Comma",
-            TokenType::Colon => "Colon",
-            TokenType::ColonColon => "ColonColon",
-            TokenType::Semicolon => "Semicolon",
-            TokenType::Percent => "Percent",
-            TokenType::Assign => "Assign",
-            TokenType::Eof => "Eof",
+            TokenType::Plus => "+",
+            TokenType::Minus => "-",
+            TokenType::Star => "*",
+            TokenType::Slash => "/",
+            TokenType::StarStar => "**",
+            TokenType::Eq => "==",
+            TokenType::Ne => "/=",
+            TokenType::Lt => "<",
+            TokenType::Le => "<=",
+            TokenType::Gt => ">",
+            TokenType::Ge => ">=",
+            TokenType::And => ".AND.",
+            TokenType::Or => ".OR.",
+            TokenType::Not => ".NOT.",
+            TokenType::Eqv => ".EQV.",
+            TokenType::Neqv => ".NEQV.",
+            TokenType::LeftParen => "(",
+            TokenType::RightParen => ")",
+            TokenType::LeftBracket => "[",
+            TokenType::RightBracket => "]",
+            TokenType::Comma => ",",
+            TokenType::Colon => ":",
+            TokenType::ColonColon => "::",
+            TokenType::Semicolon => ";",
+            TokenType::Percent => "%",
+            TokenType::Assign => "=",
+            TokenType::Eof => "EOF",
         }
     }
 }

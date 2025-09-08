@@ -1,2 +1,2 @@
 pub mod compiler;
-mod runtime_error;
+pub(crate) mod runtime_error;

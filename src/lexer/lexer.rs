@@ -41,6 +41,7 @@ impl Lexer
 
         let mut keywords = HashMap::new();
         keywords.insert("PROGRAM".to_string(), Keyword::Program);
+        keywords.insert("PRINT".to_string(), Keyword::Print);
         keywords.insert("END".to_string(), Keyword::End);
         keywords.insert("MODULE".to_string(), Keyword::Module);
         keywords.insert("USE".to_string(), Keyword::Use);
