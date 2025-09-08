@@ -49,7 +49,7 @@ impl Parser
             false
         }
     }
-    fn is_declaration_keyword(&mut self) ->bool
+    fn is_declaration_keyword(&self) ->bool
     {
         if let Some(token) = self.current_token()
         {
