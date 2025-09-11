@@ -18,8 +18,8 @@ This project implements a compiler for the Fortran 90/95 programming language, w
 
 #### Phase 1: Minimal Compiler
 - [X] Basic variable declarations (INTEGER, REAL)
-- [ ] Simple arithmetic expressions
-- [ ] Basic DO loops
+- [X] Simple arithmetic expressions
+- [X] Basic DO loops
 - [X] IF statements
 - [ ] Simple I/O operations
 

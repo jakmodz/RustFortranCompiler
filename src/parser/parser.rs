@@ -177,14 +177,95 @@ impl Parser
         {
             return self.parse_if_statement();
         }
+        else if self.match_keyword(Keyword::Do)
+        {
+           if self.check_keyword(Keyword::While)
+           {
+               return self.parse_while_loop_stmt();
+           }
+           return self.parse_do_for_stmt();
+        }
 
 
 
         self.parse_assigment()
     }
 
+    fn parse_do_for_stmt(&mut self) -> Result<Box<Stmt>, ParsingError> {
+
+        if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
+        {
+            return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+        }
+        let var_name = self.previous().clone().lexeme;
 
 
+        self.consume(TokenType::Assign, "Expected '=' after variable name".to_string())?;
+
+        let start_expr = self.parse_expression()?;
+
+        self.consume(TokenType::Comma, "Expected ',' after assigment".to_string())?;
+
+        let end_expr = self.parse_expression()?;
+
+        let step = if self.match_tokens(&[TokenType::Comma])
+        {
+            Some(*self.parse_expression()?)
+        }
+        else
+        {
+            None
+        };
+
+
+        let mut stmts = Vec::new();
+        while !self.check_keyword(Keyword::End)
+        {
+            if self.is_at_end()
+            {
+                return Err(ParsingError::SyntaxError(self.previous().clone(),"Expected 'END DO' to close DO loop".to_string()));
+            }
+            let stmt = self.parse_statement()?;
+            stmts.push(*stmt);
+        }
+
+        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END' to close DO loop".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Do), "Expected 'DO' after 'END'".to_string())?;
+
+        let do_for_stmt = Stmt::DoFor
+        {
+            var_name,
+            start: *start_expr,
+            end: *end_expr,
+            step,
+            statements: stmts,
+        };
+
+        Ok(Box::new(do_for_stmt))
+    }
+    fn parse_while_loop_stmt(&mut self)->Result<Box<Stmt>,ParsingError>
+    {
+        self.consume(TokenType::Keyword(Keyword::While),"Expected 'WHILE' after 'DO'".to_string())?;
+        self.consume(TokenType::LeftParen,"Expected '(' after 'WHILE'".to_string())?;
+        let condition = self.parse_expression()?;
+        self.consume(TokenType::RightParen,"Expected ')' after condition".to_string())?;
+
+
+        let mut stmts = Vec::new();
+
+        while !self.check_keyword(Keyword::End)
+        {
+            let stmt = self.parse_statement()?;
+            stmts.push(*stmt);
+        }
+
+        self.consume(TokenType::Keyword(Keyword::End),"Expected 'END' to close DO WHILE loop".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Do),"Expected 'DO' after 'END'".to_string())?;
+
+
+        let do_while_stmt = Stmt::DoWhile{cond:*condition,statements:stmts};
+        Ok(Box::new(do_while_stmt))
+    }
     fn parse_assigment(&mut self)->Result<Box<Stmt>,ParsingError>
     {
         if !self.match_tokens(&[TokenType::Identifier(String::from(""))])

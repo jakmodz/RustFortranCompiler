@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod tests_lexer {
     use crate::lexer::lexer::Lexer;
@@ -190,19 +189,24 @@ END PROGRAM test
         let result = parse_program(source);
         assert!(result.is_ok());
 
-        if let Ok(ProgramUnit::Program { program }) = result {
+        if let Ok(ProgramUnit::Program { program }) = result
+        {
             assert_eq!(program.declarations.len(), 1);
-            if let Declaration::Parameter { name, var_type, value: _ } = &program.declarations[0] {
+            if let Declaration::Parameter { name, var_type, value: _ } = &program.declarations[0]
+            {
                 assert_eq!(name, "MAX_SIZE");
                 assert!(matches!(var_type, VarType::Integer));
-            } else {
+            }
+            else
+            {
                 panic!("Expected parameter declaration");
             }
         }
     }
 
     #[test]
-    fn test_arithmetic_expressions() {
+    fn test_arithmetic_expressions()
+    {
         let expr = parse_expression("2 + 3 * 4").unwrap();
         // Should parse as 2 + (3 * 4) due to precedence
         if let Expr::BinaryOp { left, op, right } = expr.as_ref() {
@@ -374,7 +378,7 @@ mod tests_compiler
         let mut parser = Parser::new(tokens);
         let program_unit = parser.parse_all().unwrap();
 
-        let mut compiler = Compiler::new( "test_module")?;
+        let mut compiler = Compiler::new("test_module")?;
         compiler.compile(vec![program_unit])?;
         Ok(compiler)
     }
@@ -501,18 +505,18 @@ END PROGRAM test
         let result = compile_program(source);
         assert!(result.is_ok());
     }
-//not implemented yet
-//     #[test]
-//     fn test_character_compilation() {
-//         let source = r#"
-// PROGRAM test
-// CHARACTER(10) :: greeting = 'Hello'
-// PRINT greeting
-// END PROGRAM test
-// "#;
-//         let result = compile_program(source);
-//         assert!(result.is_ok());
-//     }
+    //not implemented yet
+    //     #[test]
+    //     fn test_character_compilation() {
+    //         let source = r#"
+    // PROGRAM test
+    // CHARACTER(10) :: greeting = 'Hello'
+    // PRINT greeting
+    // END PROGRAM test
+    // "#;
+    //         let result = compile_program(source);
+    //         assert!(result.is_ok());
+    //     }
 
     #[test]
     fn test_comparison_operations() {
@@ -618,6 +622,66 @@ ELSE
 END IF
 END PROGRAM test
 "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_while_loop_compilation() {
+        let source = r#"
+        PROGRAM test
+         INTEGER :: i = 1
+          DO WHILE (i <= 5)
+               print  i
+               i = i + 1
+          END DO
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_nested_while_loop_compilation() {
+        let source = r#"
+        PROGRAM test
+         INTEGER :: i = 1
+         INTEGER :: j = 1
+          DO WHILE (i <= 5)
+           DO WHILE (j <= 5)
+               print  j
+               j = j + 1
+            END DO
+            i = i + 1
+            print i
+          END DO
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_for_loop_compilation() {
+        let source = r#"
+        PROGRAM test
+         INTEGER :: i
+          DO i = 1, 5
+               print  i
+          END DO
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_for_loop_with_step_compilation() {
+        let source = r#"
+        PROGRAM test
+         INTEGER :: i
+          DO i = 1, 5 , 1
+               print  i
+          END DO
+        END PROGRAM test
+                "#;
         let result = compile_program(source);
         assert!(result.is_ok());
     }

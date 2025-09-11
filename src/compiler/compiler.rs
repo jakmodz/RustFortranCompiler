@@ -301,6 +301,85 @@ impl Compiler
                           module
                    )?;
                 }
+            Stmt::DoWhile {cond,statements} =>
+                {
+                    let loop_header = builder.create_block();
+                    let loop_block = builder.create_block();
+                    let after_loop_block = builder.create_block();
+
+                    builder.ins().jump(loop_header, &[]);
+
+                    builder.switch_to_block(loop_header);
+
+                    let cond_value = Self::compile_expr_helper(builder, &cond, variables, variable_types, module)?;
+                    let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
+
+                    builder.ins().brif(boolean_cond,loop_block,&[]
+                                       ,after_loop_block,&[]);
+
+                    builder.switch_to_block(loop_block);
+                    for stmt in statements
+                    {
+                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+                    }
+
+                    builder.ins().jump(loop_header, &[]);
+                    builder.seal_block(loop_block);
+
+                    builder.seal_block(loop_header);
+
+                    builder.switch_to_block(after_loop_block);
+                    builder.seal_block(after_loop_block);
+                }
+            Stmt::DoFor {var_name,statements,end,start,step}=>
+                {
+                    let i32_type = types::I32;
+                    let loop_var =variables.get(&var_name).ok_or(RuntimeError::NotDefinedVar(var_name.clone()))?.clone();
+
+                    let loop_header = builder.create_block();
+                    let loop_body = builder.create_block();
+                    let after_loop = builder.create_block();
+
+
+                    let start_val = Self::compile_expr_helper(builder, &start, variables, variable_types, module)?;
+                    builder.def_var(loop_var, start_val);
+
+
+                    builder.ins().jump(loop_header, &[]);
+                   
+
+                    builder.switch_to_block(loop_header);
+                    let current_val = builder.use_var(loop_var);
+                    let end_val = Self::compile_expr_helper(builder, &end, variables, variable_types, module)?;
+                    let condition = builder.ins().icmp(IntCC::SignedLessThanOrEqual, current_val, end_val);
+                    builder.ins().brif(condition, loop_body, &[], after_loop, &[]);
+
+
+                    builder.switch_to_block(loop_body);
+                    for stmt in statements
+                    {
+                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+                    }
+
+
+                    let current_val = builder.use_var(loop_var);
+                    let step_val =
+                    match step
+                    {
+                        Some(step_expr) => Self::compile_expr_helper(builder, &step_expr, variables, variable_types, module)?,
+                        None => builder.ins().iconst(i32_type, 1),
+                    };
+                    let next_val = builder.ins().iadd(current_val, step_val);
+                    builder.def_var(loop_var, next_val);
+
+
+                    builder.ins().jump(loop_header, &[]);
+                    builder.seal_block(loop_body);
+                    builder.seal_block(loop_header);
+
+                    builder.switch_to_block(after_loop);
+                    builder.seal_block(after_loop);
+                }
         }
         Ok(())
     }
@@ -324,9 +403,7 @@ impl Compiler
             module
         )?;
 
-
         let if_block = builder.create_block();
-
 
         let first_else_block = if !else_ifs.is_empty() || else_last.is_some() {
             builder.create_block()
@@ -657,7 +734,33 @@ impl Compiler
                 }
             Expr::UnaryOp { op, expr } =>
                 {
-                    todo!()
+                    let val = Self::compile_expr_helper(builder, expr, variables, variable_types, module)?;
+                    let val_type = builder.func.dfg.value_type(val);
+
+                    match op.token_type.lexeme()
+                    {
+                        "-" =>
+                            {
+                                if val_type.is_float()
+                                {
+                                    Ok(builder.ins().fneg(val))
+                                }
+                                else
+                                {
+                                    Ok(builder.ins().ineg(val))
+                                }
+                            }
+                        "+" =>
+                            {
+                                Ok(val)
+                            }
+                        ".NOT." =>
+                            {
+                                let zero = builder.ins().iconst(val_type, 0);
+                                Ok(builder.ins().icmp(IntCC::Equal, val, zero))
+                            }
+                        _ => Err(RuntimeError::InvalidOperation("unknown unary operator".to_string()).into())
+                    }
                 }
             Expr::Grouping { expr } =>
                 {
