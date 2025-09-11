@@ -1,6 +1,6 @@
 use crate::lexer::token::*;
 use crate::parser::parsing_error::ParsingError;
-use crate::parser::ast::{Declaration, Expr, Literal, Stmt, VarType};
+use crate::parser::ast::{Declaration, Expr, If, Literal, Stmt, VarType};
 use crate::parser::program_unit::*;
 use crate::Common::type_resolver::resolve_simple_type;
 
@@ -79,6 +79,30 @@ impl Parser
             Some(&self.tokens[self.current])
         }
     }
+    fn match_keyword(&mut self, keyword: Keyword) -> bool
+    {
+        if let Some(token) = self.current_token()
+        {
+            if matches!(&token.token_type, TokenType::Keyword(k) if *k == keyword)
+            {
+                self.advance();
+                return true;
+            }
+        }
+        false
+    }
+    fn peek_next_is_keyword(&self, keyword: Keyword) -> bool
+    {
+        if self.current + 1 < self.tokens.len()
+        {
+            if let TokenType::Keyword(k) = &self.tokens[self.current + 1].token_type
+            {
+                return *k == keyword;
+            }
+        }
+        false
+    }
+
     fn consume(&mut self, expected: TokenType,msg:String)->Result<&Token, ParsingError>
     {
         if let Some(token) = self.current_token()
@@ -151,7 +175,7 @@ impl Parser
         }
         else if self.check_keyword(Keyword::If)
         {
-            todo!("gustyn")
+            return self.parse_if_statement();
         }
 
 
@@ -257,31 +281,83 @@ impl Parser
             _ => Err(ParsingError::UnexpectedToken(token.clone()))
         }
     }
-    fn parse_expression(&mut self)->Result<Box<Expr>,ParsingError>
-    {
-        let mut node = self.parse_comparison()?;
-        while self.match_tokens(&[TokenType::Plus, TokenType::Minus])
-        {
-            let operator = self.previous().clone();
-            let right = self.parse_comparison()?;
-            let expr = Expr::BinaryOp{left:node,right,op:operator.token_type};
-            node = Box::new(expr);
 
+
+
+    fn parse_if_statement(&mut self) -> Result<Box<Stmt>, ParsingError>
+    {
+        self.consume(TokenType::Keyword(Keyword::If), "Expected 'IF'".to_string())?;
+        self.consume(TokenType::LeftParen, "Expected '(' after 'IF'".to_string())?;
+        let condition = self.parse_expression()?;
+        self.consume(TokenType::RightParen, "Expected ')' after condition".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Then), "Expected 'THEN' after condition".to_string())?;
+
+        let mut stmts = Vec::new();
+
+        while !self.check_keyword(Keyword::Else) &&
+            !self.check_keyword(Keyword::ElseIf) &&
+            !(self.check_keyword(Keyword::End) && self.peek_next_is_keyword(Keyword::If))
+        {
+            let stmt = self.parse_statement()?;
+            stmts.push(*stmt);
         }
-        Ok(node)
+
+        let init_if = If::new(*condition, stmts);
+        let mut else_ifs = Vec::new();
+        let mut else_last = None;
+
+        while self.match_keyword(Keyword::ElseIf)
+        {
+            self.consume(TokenType::LeftParen, "Expected '(' after 'ELSE IF'".to_string())?;
+            let elif_condition = self.parse_expression()?;
+            self.consume(TokenType::RightParen, "Expected ')' after condition".to_string())?;
+            self.consume(TokenType::Keyword(Keyword::Then), "Expected 'THEN' after condition".to_string())?;
+
+            let mut elif_stmts = Vec::new();
+
+            while !self.check_keyword(Keyword::Else) &&
+                !(self.check_keyword(Keyword::End) && self.peek_next_is_keyword(Keyword::If))
+            {
+                let stmt = self.parse_statement()?;
+                elif_stmts.push(*stmt);
+            }
+
+            else_ifs.push(If::new(*elif_condition, elif_stmts));
+        }
+
+        if self.check_keyword(Keyword::Else)
+        {
+            else_last = Some(self.parse_else()?);
+        }
+        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END'".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::If), "Expected 'IF'".to_string())?;
+        let if_stmt = Stmt::If { init_if, else_ifs, else_last };
+        Ok(Box::new(if_stmt))
     }
 
+    fn parse_else(&mut self) -> Result<If, ParsingError>
+    {
+        self.consume(TokenType::Keyword(Keyword::Else), "Expected 'ELSE'".to_string())?;
+
+        let mut stmts = Vec::new();
+        while !self.check_keyword(Keyword::End)
+        {
+            let stmt = self.parse_statement()?;
+            stmts.push(*stmt);
+        }
+
+        let dummy_condition = Expr::Literal { value: Literal::Logical(true) };
+        Ok(If::new(dummy_condition, stmts))
+    }
     fn parse_declaration(&mut self)->Result<Vec<Declaration>,ParsingError>
     {
-
         if self.is_declaration_keyword()
         {
             let var_type = self.get_var_type()?;
             if self.match_tokens(&[TokenType::Comma])
             {
-                if self.check_keyword(Keyword::Parameter)
+                if self.match_keyword(Keyword::Parameter)
                 {
-                    self.advance();
                     return Ok(vec![self.parse_parameter_declaration(var_type)?]);
                 }
 
@@ -352,17 +428,69 @@ impl Parser
         let v = value.as_ref().clone();
         Ok(Declaration::Parameter {name:var_name,var_type,value: v })
     }
-    fn parse_comparison(&mut self)->Result<Box<Expr>,ParsingError>
+    pub(crate) fn parse_expression(&mut self) -> Result<Box<Expr>, ParsingError> {
+        self.parse_logical_or()
+    }
+
+    fn parse_logical_or(&mut self) -> Result<Box<Expr>, ParsingError>
+    {
+        let mut node = self.parse_logical_and()?;
+
+        while self.match_tokens(&[TokenType::Or])
+        {
+            let operator = self.previous().clone();
+            let right = self.parse_logical_and()?;
+            let left = node;
+            let expr = Expr::BinaryOp { left, right, op: operator.token_type };
+            node = Box::new(expr);
+        }
+
+        Ok(node)
+    }
+
+    fn parse_logical_and(&mut self) -> Result<Box<Expr>, ParsingError>
+    {
+        let mut node = self.parse_comparison()?;
+
+        while self.match_tokens(&[TokenType::And])
+        {
+            let operator = self.previous().clone();
+            let right = self.parse_comparison()?;
+            let left = node;
+            let expr = Expr::BinaryOp { left, right, op: operator.token_type };
+            node = Box::new(expr);
+        }
+
+        Ok(node)
+    }
+
+
+    fn parse_comparison(&mut self) -> Result<Box<Expr>, ParsingError>
+    {
+        let mut node = self.parse_addition()?;
+        while self.match_tokens(&[TokenType::Eq, TokenType::Ne, TokenType::Lt, TokenType::Le, TokenType::Gt, TokenType::Ge])
+        {
+            let operator = self.previous().clone();
+            let right = self.parse_addition()?;
+            let left = node;
+            let expr = Expr::BinaryOp { left, right, op: operator.token_type };
+            node = Box::new(expr);
+        }
+        Ok(node)
+    }
+
+    fn parse_addition(&mut self) -> Result<Box<Expr>, ParsingError>
     {
         let mut node = self.term()?;
-        while self.match_tokens(&[TokenType::Eq, TokenType::Ne,TokenType::Lt,TokenType::Le,TokenType::Gt,TokenType::Ge])
-        {
+
+        while self.match_tokens(&[TokenType::Plus, TokenType::Minus]) {
             let operator = self.previous().clone();
             let right = self.term()?;
             let left = node;
-            let expr = Expr::BinaryOp{left,right,op:operator.token_type};
+            let expr = Expr::BinaryOp { left, right, op: operator.token_type };
             node = Box::new(expr);
         }
+
         Ok(node)
     }
     fn term(&mut self)->Result<Box<Expr>,ParsingError>

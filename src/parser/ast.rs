@@ -52,7 +52,25 @@ pub enum Stmt
     Assignment{var_name:String,expr:Box<Expr>},
 
     Print{expr:Box<Expr>},
-    If{cond:Box<Expr>,then:Box<Stmt>},
+    If{init_if:If,else_ifs: Vec<If>, else_last: Option<If>},
 
 }
+#[derive(Debug,Clone)]
+pub struct If
+{
+    pub cond:Expr,
+    pub statements: Vec<Stmt>,
+}
 
+
+impl If
+{
+    pub fn new(cond:Expr,statements:Vec<Stmt>)->If
+    {
+        Self
+        {
+            cond,
+            statements
+        }
+    }
+}

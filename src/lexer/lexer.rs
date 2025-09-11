@@ -1,6 +1,7 @@
 use crate::lexer::token::{Token,TokenType,Keyword};
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub enum LexerError
 {
     UnexpectedCharacter(char, usize),
@@ -220,11 +221,15 @@ impl Lexer
             {
                 self.string()
             }
-            ' ' | '\r' | '\t' =>
+            ' ' | '\r' | '\t'  =>
             {
                 self.advance();
                 self.next_token()
             },
+            '\0' =>
+            {
+                Ok(Token::new(TokenType::Eof, "".to_string(), self.line))
+            }
             '\n' =>
             {
                 self.line += 1;

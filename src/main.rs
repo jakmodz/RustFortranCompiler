@@ -2,6 +2,7 @@ mod lexer;
 mod parser;
 mod compiler;
 mod Common;
+mod tests;
 
 use crate::lexer::lexer::Lexer;
 use crate::parser::parser::{Parser};
@@ -29,13 +30,21 @@ fn run_file(_file_path: &str)
     let pr = parser.parse_all().unwrap();
     println!("{:#?}", pr);
     let mut c = Compiler::new("warkusz").unwrap();
-    c.compile(vec![pr]);
+    match c.compile(vec![pr])
+    {
+        Ok(_) => println!("Compilation successful"),
+        Err(e) =>
+            {
+                eprintln!("{}", e);
+                return;
+            }
+    }
+
     generate_object_file(c,PATH).unwrap()
 
 }
 fn main()
 {
-    //todo!(check if it compiles to binary and run it);
     let args: Vec<String> = env::args().collect();
     // if args.len() != 2
     // {

@@ -1,6 +1,7 @@
 use std::fmt;
 
 #[derive(Debug, Clone)]
+#[derive(PartialEq)]
 pub enum TokenType
 {
     //literal
@@ -54,7 +55,6 @@ pub enum TokenType
 }
 impl TokenType
 {
-    /// Returns the lexeme for operator and delimiter types, or a descriptive string for others.
     pub fn lexeme(&self) -> &'static str
     {
         match self

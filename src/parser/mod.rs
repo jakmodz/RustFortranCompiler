@@ -3,6 +3,6 @@ pub mod ast;
 
 mod analyzer;
 pub mod program_unit;
-mod parsing_error;
+pub mod parsing_error;
 
 

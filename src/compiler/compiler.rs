@@ -10,12 +10,19 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use anyhow::{anyhow, Error};
 use cranelift_codegen::Context;
+use cranelift_codegen::isa::CallConv;
 use target_lexicon::Triple;
-use crate::Common::type_resolver::{fortran_type_to_cranelift,convert_value_to_type};
+use crate::Common::type_resolver::{fortran_type_to_cranelift};
 use crate::compiler::runtime_error::RuntimeError;
 use crate::parser::program_unit::*;
 use crate::parser::ast::*;
+use crate::compiler::type_converter::TypeConverter;
 
+#[cfg(target_os = "windows")]
+pub const HOST_CALLCONV: CallConv = CallConv::WindowsFastcall;
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
+pub const HOST_CALLCONV: CallConv = CallConv::SystemV;
 
 pub struct Compiler
 {
@@ -28,6 +35,7 @@ pub struct Compiler
 
     variables: HashMap<String, Variable>,
     variable_types: HashMap<String, VarType>,
+    target:Triple
 }
 
 impl Compiler
@@ -39,6 +47,18 @@ impl Compiler
         flag_builder.set("use_colocated_libcalls", "false")?;
         flag_builder.set("enable_verifier", "true")?;
         flag_builder.set("enable_alias_analysis", "false")?;
+
+        flag_builder.set("opt_level", "none")?;
+        flag_builder.set("enable_pinned_reg", "false")?;
+        flag_builder.set("enable_nan_canonicalization", "false")?;
+        flag_builder.set("use_colocated_libcalls", "false")?;
+        flag_builder.set("enable_verifier", "true")?;
+        flag_builder.set("enable_alias_analysis", "false")?;
+        flag_builder.set("opt_level", "none")?;
+        flag_builder.set("enable_pinned_reg", "false")?;
+        flag_builder.set("enable_nan_canonicalization", "false")?;
+
+
         let isa_builder = cranelift_codegen::isa::lookup(target.clone())?;
         let flags = cranelift_codegen::settings::Flags::new(flag_builder);
         let isa = isa_builder.finish(flags)?;
@@ -60,6 +80,7 @@ impl Compiler
             next_func_id: 0,
             variables: HashMap::new(),
             variable_types: HashMap::new(),
+            target
         })
     }
 
@@ -114,13 +135,14 @@ impl Compiler
                 Self::compile_stmt_helper(stmt, &mut builder, &mut self.variables, &mut self.variable_types, &mut self.module)?;
             }
 
+
             let return_value = builder.ins().iconst(types::I32, 0);
             builder.ins().return_(&[return_value]);
 
             builder.seal_all_blocks();
             builder.finalize();
         }
-
+        eprintln!("{}", self.ctx.func.display());
         self.module.define_function(main_id, &mut self.ctx)?;
         self.module.clear_context(&mut self.ctx);
 
@@ -159,7 +181,7 @@ impl Compiler
                     if let Some(value) = initial_value
                     {
                         let val = Self::compile_expr_helper(builder, &value, variables, variable_types, module)?;
-                        let converted_val = convert_value_to_type(builder, val, &var_type)?;
+                        let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
                         builder.def_var(var, converted_val);
                     }
                 }
@@ -171,7 +193,7 @@ impl Compiler
                     builder.declare_var(var, fortran_type_to_cranelift(&var_type));
 
                     let val = Self::compile_expr_helper(builder, &value, variables, variable_types, module)?;
-                    let converted_val = convert_value_to_type(builder, val, &var_type)?;
+                    let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
                     builder.def_var(var, converted_val);
                 }
         }
@@ -187,12 +209,11 @@ impl Compiler
         if let Some(value) = expr
         {
             let val = Self::compile_expr_helper(builder, &value, &mut self.variables, &mut self.variable_types, &mut self.module)?;
-            let converted_val = convert_value_to_type(builder, val, &var_type)?;
+            let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
             builder.def_var(var, converted_val);
         }
         Ok(())
     }
-
 
 
     fn compile_stmt_helper(
@@ -200,7 +221,7 @@ impl Compiler
         builder: &mut FunctionBuilder,
         variables: &mut HashMap<String, Variable>,
         variable_types: &mut HashMap<String, VarType>,
-        module: &mut ObjectModule
+        module: &mut ObjectModule,
     ) -> anyhow::Result<()>
     {
         match stmt
@@ -212,7 +233,7 @@ impl Compiler
                     {
                         if let Some(var_type) = variable_types.get(&var_name)
                         {
-                            let converted_value = convert_value_to_type(builder, value, var_type)?;
+                            let converted_value = TypeConverter::convert_value_to_type(builder, value, var_type)?;
                             builder.def_var(*var, converted_value);
                         }
                         else
@@ -226,17 +247,236 @@ impl Compiler
                     }
                 }
             Stmt::Print { expr } =>
+            {
+                // print stmt is just implemented to print integers and floats to console for test. It is not a full implementation of Fortran print statement.
+                let value = Self::compile_expr_helper(builder, &expr.as_ref().clone(), variables, variable_types, module)?;
+                let value_type = builder.func.dfg.value_type(value);
+
+                let (format_data, param_type) = if value_type == types::F32 || value_type == types::F64
                 {
-                    let value = Self::compile_expr_helper(builder, &expr.as_ref().clone(), variables, variable_types, module)?;
+                    (b"%f\n\0", value_type)
                 }
-            Stmt::If {cond, then} =>
+                else
                 {
-                    todo!()
+                    (b"%d\n\0", types::I32)
+                };
+
+                let printf_sig = {
+                    let mut sig = module.make_signature();
+                    sig.params.push(AbiParam::new(types::I64));
+                    sig.params.push(AbiParam::new(param_type));
+                    sig.returns.push(AbiParam::new(types::I32));
+                    sig.call_conv = HOST_CALLCONV;
+                    sig
+                };
+
+                let printf_func = module.declare_function("printf", Linkage::Import, &printf_sig)?;
+                let local_printf = module.declare_func_in_func(printf_func, builder.func);
+
+                let format_id = module.declare_data(
+                    &format!("printf_format_{}_{}", builder.func.name, builder.func.dfg.num_values()),
+                    Linkage::Local,
+                    false,
+                    false
+                )?;
+                let mut data_desc = cranelift_module::DataDescription::new();
+                data_desc.define(format_data.to_vec().into_boxed_slice());
+                module.define_data(format_id, &data_desc)?;
+
+                let format_global = module.declare_data_in_func(format_id, builder.func);
+                let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+                builder.ins().call(local_printf, &[format_ptr, value]);
+            }
+
+            Stmt::If {init_if, else_ifs, else_last} =>
+                {
+                   Self::compile_if_statement(
+                          builder,
+                          init_if,
+                          else_ifs,
+                          else_last,
+                          variables,
+                          variable_types,
+                          module
+                   )?;
                 }
         }
         Ok(())
     }
+    fn compile_if_statement(
+        builder: &mut FunctionBuilder,
+        init_if: If,
+        else_ifs: Vec<If>,
+        else_last: Option<If>,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
+    {
+        let end_block = builder.create_block();
 
+        let cond_value = Self::compile_expr_helper(
+            builder,
+            &init_if.cond,
+            variables,
+            variable_types,
+            module
+        )?;
+
+
+        let if_block = builder.create_block();
+
+
+        let first_else_block = if !else_ifs.is_empty() || else_last.is_some() {
+            builder.create_block()
+        } else {
+            end_block
+        };
+
+
+        let cond_value = Self::ensure_boolean_condition(builder, cond_value)?;
+        builder.ins().brif(cond_value, if_block, &[], first_else_block, &[]);
+
+
+        builder.switch_to_block(if_block);
+        builder.seal_block(if_block);
+
+        for stmt in &init_if.statements
+        {
+            Self::compile_stmt_helper(
+                stmt.clone(),
+                builder,
+                variables,
+                variable_types,
+                module
+            )?;
+        }
+
+        builder.ins().jump(end_block, &[]);
+
+        let mut current_block = first_else_block;
+
+        for (i, else_if) in else_ifs.iter().enumerate()
+        {
+
+            if current_block != end_block
+            {
+                builder.switch_to_block(current_block);
+                builder.seal_block(current_block);
+            }
+
+            let next_block = if i == else_ifs.len() - 1
+            {
+                if else_last.is_some()
+                {
+                    builder.create_block()
+                }
+                else
+                {
+                    end_block
+                }
+            }
+            else
+            {
+                builder.create_block()
+            };
+
+            let cond_value = Self::compile_expr_helper(
+                builder,
+                &else_if.cond,
+                variables,
+                variable_types,
+                module
+            )?;
+
+            let else_if_block = builder.create_block();
+
+            let cond_value = Self::ensure_boolean_condition(builder, cond_value)?;
+            builder.ins().brif(cond_value, else_if_block, &[], next_block, &[]);
+
+            builder.switch_to_block(else_if_block);
+            builder.seal_block(else_if_block);
+
+            for stmt in &else_if.statements
+            {
+                Self::compile_stmt_helper(
+                    stmt.clone(),
+                    builder,
+                    variables,
+                    variable_types,
+                    module
+                )?;
+            }
+
+            builder.ins().jump(end_block, &[]);
+
+            current_block = next_block;
+        }
+
+        if let Some(else_branch) = else_last
+        {
+
+            if current_block != end_block
+            {
+                builder.switch_to_block(current_block);
+                builder.seal_block(current_block);
+
+                for stmt in &else_branch.statements
+                {
+                    Self::compile_stmt_helper(
+                        stmt.clone(),
+                        builder,
+                        variables,
+                        variable_types,
+                        module
+                    )?;
+                }
+
+                builder.ins().jump(end_block, &[]);
+            }
+        }
+        else
+        {
+            if current_block != end_block
+            {
+                builder.switch_to_block(current_block);
+                builder.seal_block(current_block);
+                builder.ins().jump(end_block, &[]);
+            }
+        }
+
+        builder.switch_to_block(end_block);
+        builder.seal_block(end_block);
+        Ok(())
+    }
+    fn compile_if_branch(
+        builder: &mut FunctionBuilder,
+        if_branch: If,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule,
+        next_block: Block,
+        end_block: Block
+    ) -> anyhow::Result<()>
+    {
+        let cond_value = Self::compile_expr_helper(builder, &if_branch.cond, variables, variable_types, module)?;
+        let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
+
+        let then_block = builder.create_block();
+        builder.ins().brif(boolean_cond, then_block, &[],next_block,&[]);
+
+        builder.switch_to_block(then_block);
+        builder.seal_block(then_block);
+        for stmt in if_branch.statements
+        {
+            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+        }
+        builder.ins().jump(end_block, &[]);
+        builder.switch_to_block(next_block);
+        builder.seal_block(next_block);
+        Ok(())
+    }
     fn compile_expr_helper(
         builder: &mut FunctionBuilder,
         expr: &Expr,
@@ -288,16 +528,7 @@ impl Compiler
                     let left_type = builder.func.dfg.value_type(left_val);
                     let right_type = builder.func.dfg.value_type(right_val);
 
-                    let (left_converted, right_converted) = match (left_type, right_type)
-                    {
-                        (types::F32, types::F64) => (builder.ins().fpromote(types::F64, left_val), right_val),
-                        (types::F64, types::F32) => (left_val, builder.ins().fpromote(types::F64, right_val)),
-                        (types::I32, types::F32) => (builder.ins().fcvt_from_sint(types::F32, left_val), right_val),
-                        (types::F32, types::I32) => (left_val, builder.ins().fcvt_from_sint(types::F32, right_val)),
-                        (types::I32, types::F64) => (builder.ins().fcvt_from_sint(types::F64, left_val), right_val),
-                        (types::F64, types::I32) => (left_val, builder.ins().fcvt_from_sint(types::F64, right_val)),
-                        _ => (left_val, right_val),
-                    };
+                    let (left_converted, right_converted) =TypeConverter::convert_operands(builder,left_val,left_type,right_val,right_type);
 
                     let result_type = builder.func.dfg.value_type(left_converted);
 
@@ -413,7 +644,15 @@ impl Compiler
                                     Ok(builder.ins().icmp(IntCC::NotEqual, left_converted, right_converted))
                                 }
                             }
-                        _ => anyhow::bail!("unknown binary operator"),
+                        ".AND."=>
+                            {
+                                Ok(builder.ins().band(left_converted, right_converted))
+                            }
+                        ".OR."=>
+                            {
+                                Ok(builder.ins().bor(left_converted, right_converted))
+                            }
+                        _ => Err(RuntimeError::InvalidOperation("uknown operator".to_string()).into())
                     }
                 }
             Expr::UnaryOp { op, expr } =>
@@ -430,6 +669,47 @@ impl Compiler
                 }
         }
     }
+    fn ensure_boolean_condition(
+        builder: &mut FunctionBuilder,
+        cond_value: Value
+    ) -> anyhow::Result<Value> {
+        let cond_type = builder.func.dfg.value_type(cond_value);
+
+        match cond_type
+        {
+            types::I8 =>
+            {
+                let zero = builder.ins().iconst(types::I8, 0);
+                Ok(builder.ins().icmp(IntCC::NotEqual, cond_value, zero))
+            }
+            types::I32 =>
+            {
+                let zero = builder.ins().iconst(types::I32, 0);
+                Ok(builder.ins().icmp(IntCC::NotEqual, cond_value, zero))
+            }
+            types::I64 =>
+            {
+                let zero = builder.ins().iconst(types::I64, 0);
+                Ok(builder.ins().icmp(IntCC::NotEqual, cond_value, zero))
+            }
+            types::F32 =>
+            {
+                let zero = builder.ins().f32const(0.0);
+                Ok(builder.ins().fcmp(FloatCC::NotEqual, cond_value, zero))
+            }
+            types::F64 =>
+            {
+                let zero = builder.ins().f64const(0.0);
+                Ok(builder.ins().fcmp(FloatCC::NotEqual, cond_value, zero))
+            }
+            _ =>
+            {
+
+                let zero = builder.ins().iconst(types::I32, 0);
+                Ok(builder.ins().icmp(IntCC::NotEqual, cond_value, zero))
+            }
+        }
+    }
 }
 
 pub fn generate_object_file(compiler: Compiler, path: &str) -> anyhow::Result<()>
@@ -439,9 +719,6 @@ pub fn generate_object_file(compiler: Compiler, path: &str) -> anyhow::Result<()
 
     let mut file = std::fs::File::create(path)?;
     file.write_all(&object_bytes)?;
-    if object_bytes.len() <= 78
-    {
-        return Err(anyhow!("basic obj file size"));
-    }
+
     Ok(())
 }

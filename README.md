@@ -20,7 +20,7 @@ This project implements a compiler for the Fortran 90/95 programming language, w
 - [X] Basic variable declarations (INTEGER, REAL)
 - [ ] Simple arithmetic expressions
 - [ ] Basic DO loops
-- [ ] IF statements
+- [X] IF statements
 - [ ] Simple I/O operations
 
 #### Phase 2: Core Fortran 90

@@ -1,6 +1,7 @@
-PROGRAM warkusz
-REAL :: i =2 ,j = 1,k
-i = 3.14
-i = i * 2.0
-
-END PROGRAM warkusz
+PROGRAM test
+INTEGER :: i = 5
+REAL :: r = 3.14
+REAL :: result
+result = i + r
+PRINT result
+END PROGRAM test
