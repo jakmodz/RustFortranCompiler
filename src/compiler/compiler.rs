@@ -214,8 +214,103 @@ impl Compiler
         }
         Ok(())
     }
+    fn compile_do_while(
+        cond: Expr,
+        statements: Vec<Stmt>,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule)-> anyhow::Result<()>
+    {
+        let loop_header = builder.create_block();
+        let loop_block = builder.create_block();
+        let after_loop = builder.create_block();
+
+        builder.ins().jump(loop_header, &[]);
+
+        builder.switch_to_block(loop_header);
+
+        let cond_value = Self::compile_expr_helper(builder, &cond, variables, variable_types, module)?;
+        let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
+
+        builder.ins().brif(boolean_cond, loop_block, &[]
+                           , after_loop, &[]);
+
+        builder.switch_to_block(loop_block);
+        for stmt in statements
+        {
+            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+        }
+
+        builder.ins().jump(loop_header, &[]);
+        builder.seal_block(loop_block);
+
+        builder.seal_block(loop_header);
+
+        builder.switch_to_block(after_loop);
+        builder.seal_block(after_loop);
+        Ok(())
+    }
+    fn compile_do_for(
+        var_name: String,
+        start: Expr,
+        end: Expr,
+        step: Option<Expr>,
+        statements: Vec<Stmt>,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
+    {
+        let i32_type = types::I32;
+        let loop_var =variables.get(&var_name).ok_or(RuntimeError::NotDefinedVar(var_name.clone()))?.clone();
+
+        let loop_header = builder.create_block();
+        let loop_body = builder.create_block();
+        let after_loop = builder.create_block();
 
 
+        let start_val = Self::compile_expr_helper(builder, &start, variables, variable_types, module)?;
+        builder.def_var(loop_var, start_val);
+
+
+        builder.ins().jump(loop_header, &[]);
+
+
+        builder.switch_to_block(loop_header);
+        let current_val = builder.use_var(loop_var);
+        let end_val = Self::compile_expr_helper(builder, &end, variables, variable_types, module)?;
+        let condition = builder.ins().icmp(IntCC::SignedLessThanOrEqual, current_val, end_val);
+        builder.ins().brif(condition, loop_body, &[], after_loop, &[]);
+
+
+        builder.switch_to_block(loop_body);
+        for stmt in statements
+        {
+            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+        }
+
+
+        let current_val = builder.use_var(loop_var);
+        let step_val =
+            match step
+            {
+                Some(step_expr) => Self::compile_expr_helper(builder, &step_expr, variables, variable_types, module)?,
+                None => builder.ins().iconst(i32_type, 1),
+            };
+        let next_val = builder.ins().iadd(current_val, step_val);
+        builder.def_var(loop_var, next_val);
+
+
+        builder.ins().jump(loop_header, &[]);
+        builder.seal_block(loop_body);
+        builder.seal_block(loop_header);
+
+        builder.switch_to_block(after_loop);
+        builder.seal_block(after_loop);
+        Ok(())
+    }
     fn compile_stmt_helper(
         stmt: Stmt,
         builder: &mut FunctionBuilder,
@@ -304,82 +399,28 @@ impl Compiler
                 }
             Stmt::DoWhile {cond,statements} =>
                 {
-                    let loop_header = builder.create_block();
-                    let loop_block = builder.create_block();
-                    let after_loop = builder.create_block();
-
-                    builder.ins().jump(loop_header, &[]);
-
-                    builder.switch_to_block(loop_header);
-
-                    let cond_value = Self::compile_expr_helper(builder, &cond, variables, variable_types, module)?;
-                    let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
-
-                    builder.ins().brif(boolean_cond, loop_block, &[]
-                                       , after_loop, &[]);
-
-                    builder.switch_to_block(loop_block);
-                    for stmt in statements
-                    {
-                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
-                    }
-
-                    builder.ins().jump(loop_header, &[]);
-                    builder.seal_block(loop_block);
-
-                    builder.seal_block(loop_header);
-
-                    builder.switch_to_block(after_loop);
-                    builder.seal_block(after_loop);
+                    Self::compile_do_while(
+                        cond,
+                        statements,
+                        builder,
+                        variables,
+                        variable_types,
+                        module
+                    )?;
                 }
             Stmt::DoFor {var_name,statements,end,start,step}=>
                 {
-                    let i32_type = types::I32;
-                    let loop_var =variables.get(&var_name).ok_or(RuntimeError::NotDefinedVar(var_name.clone()))?.clone();
-
-                    let loop_header = builder.create_block();
-                    let loop_body = builder.create_block();
-                    let after_loop = builder.create_block();
-
-
-                    let start_val = Self::compile_expr_helper(builder, &start, variables, variable_types, module)?;
-                    builder.def_var(loop_var, start_val);
-
-
-                    builder.ins().jump(loop_header, &[]);
-                   
-
-                    builder.switch_to_block(loop_header);
-                    let current_val = builder.use_var(loop_var);
-                    let end_val = Self::compile_expr_helper(builder, &end, variables, variable_types, module)?;
-                    let condition = builder.ins().icmp(IntCC::SignedLessThanOrEqual, current_val, end_val);
-                    builder.ins().brif(condition, loop_body, &[], after_loop, &[]);
-
-
-                    builder.switch_to_block(loop_body);
-                    for stmt in statements
-                    {
-                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
-                    }
-
-
-                    let current_val = builder.use_var(loop_var);
-                    let step_val =
-                    match step
-                    {
-                        Some(step_expr) => Self::compile_expr_helper(builder, &step_expr, variables, variable_types, module)?,
-                        None => builder.ins().iconst(i32_type, 1),
-                    };
-                    let next_val = builder.ins().iadd(current_val, step_val);
-                    builder.def_var(loop_var, next_val);
-
-
-                    builder.ins().jump(loop_header, &[]);
-                    builder.seal_block(loop_body);
-                    builder.seal_block(loop_header);
-
-                    builder.switch_to_block(after_loop);
-                    builder.seal_block(after_loop);
+                   Self::compile_do_for(
+                          var_name,
+                          start,
+                          end,
+                          step,
+                          statements,
+                          builder,
+                          variables,
+                          variable_types,
+                          module
+                   )?;
                 }
             Stmt::DoInfinite {statements}=>
                 {

@@ -689,12 +689,49 @@ END PROGRAM test
     fn test_for_loop_with_step_and_condition_compilation() {
         let source = r#"
         PROGRAM test
-INTEGER :: x = 5
-    if (.NOT.(x <= 5)) then
+        INTEGER :: x = 5
+        if (.NOT.(x <= 5)) then
         print x
-    end if
-END PROGRAM test"#;
+         end if
+        END PROGRAM test"#;
         let result = compile_program(source);
         assert!(result.is_ok());
+    }
+    #[test]
+    fn test_infinite_loop_compilation() {
+        let source = r#"
+        PROGRAM test
+          DO
+               print  'infinite loop'
+          END DO
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_exit_statement_compilation() {
+        let source = r#"
+        PROGRAM test
+         INTEGER :: i = 1
+          DO WHILE (i <= 5)
+               if (i == 3) exit
+               print  i
+               i = i + 1
+          END DO
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
+    #[test]
+    fn test_exit_statement_outside_loop() {
+        let source = r#"
+        PROGRAM test
+            EXIT
+        END PROGRAM test
+                "#;
+        let result = compile_program(source);
+        assert!(result.is_err());
     }
 }
