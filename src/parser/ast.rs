@@ -20,6 +20,26 @@ pub enum VarType
     Character{len:usize}
 
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatDescriptor
+{
+    Integer { width: Option<u32>, minimum_digits: Option<u32> },
+    FixedReal { width: u32, decimal_places: u32 },
+    ScientificReal { width: u32, decimal_places: u32 },
+    Character { width: Option<u32> },
+    Skip { spaces: u32 },
+    Literal(String),
+    Repeat { count: u32, descriptors: Vec<FormatDescriptor> },
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatSpec
+{
+    ListDirected,
+    Formatted(Vec<FormatDescriptor>),
+}
 #[derive(Debug, Clone)]
 pub enum Declaration
 {
@@ -51,7 +71,9 @@ pub enum Stmt
 {
     Assignment{var_name:String,expr:Box<Expr>},
 
-    Print{expr:Box<Expr>},
+    Print{format:FormatSpec,exprs:Vec<Box<Expr>>},
+    Read{format:FormatSpec,vars:Vec<String>},
+
     If{init_if:If,else_ifs: Vec<If>, else_last: Option<If>},
     DoWhile{cond:Expr,statements: Vec<Stmt>},
     DoFor{var_name:String,start:Expr,end:Expr,step:Option<Expr>,statements: Vec<Stmt>},
