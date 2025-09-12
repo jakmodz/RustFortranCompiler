@@ -685,4 +685,16 @@ END PROGRAM test
         let result = compile_program(source);
         assert!(result.is_ok());
     }
+    #[test]
+    fn test_for_loop_with_step_and_condition_compilation() {
+        let source = r#"
+        PROGRAM test
+INTEGER :: x = 5
+    if (.NOT.(x <= 5)) then
+        print x
+    end if
+END PROGRAM test"#;
+        let result = compile_program(source);
+        assert!(result.is_ok());
+    }
 }

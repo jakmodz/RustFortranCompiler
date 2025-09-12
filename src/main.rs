@@ -10,7 +10,7 @@ use std::env;
 use std::fs;
 use crate::compiler::compiler::{Compiler,generate_object_file};
 use crate::parser::ast::{Expr,Literal};
-const PATH: &str = "warkusz.obj";
+const PATH: &str = "warkusz.o";
 fn run_file(_file_path: &str)
 {
     let file = fs::read_to_string("test.f90").expect("Unable to read file");

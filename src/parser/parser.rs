@@ -590,7 +590,7 @@ impl Parser
 
     fn factor(&mut self)->Result<Box<Expr>,ParsingError>
     {
-        if self.match_tokens(&[TokenType::Minus, TokenType::Plus])
+        if self.match_tokens(&[TokenType::Minus, TokenType::Plus,TokenType::Not])
         {
             let operator = self.previous().clone();
             let right = self.factor()?;
