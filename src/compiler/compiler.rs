@@ -381,6 +381,28 @@ impl Compiler
                     builder.switch_to_block(after_loop);
                     builder.seal_block(after_loop);
                 }
+            Stmt::DoInfinite {statements}=>
+                {
+                    let loop_header = builder.create_block();
+                    let loop_body = builder.create_block();
+                    let after_loop = builder.create_block();
+                    builder.ins().jump(loop_header, &[]);
+
+                    builder.switch_to_block(loop_header);
+                    builder.ins().jump(loop_body, &[]);
+
+                    builder.switch_to_block(loop_body);
+                    for stmt in statements
+                    {
+                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+                    }
+                    builder.ins().jump(loop_header, &[]);
+
+                    builder.seal_block(loop_body);
+                    builder.seal_block(loop_header);
+                    builder.switch_to_block(after_loop);
+                    builder.seal_block(after_loop);
+                }
             Stmt::Exit =>
                 {
                     match exit_block
@@ -571,7 +593,7 @@ impl Compiler
         for stmt in if_branch.statements
         {
             Self::compile_stmt_helper(stmt, builder,
-                  variables, 
+                  variables,
                   variable_types,
                   module,
                   None)?;

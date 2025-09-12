@@ -11,11 +11,10 @@ use std::fs;
 use crate::compiler::compiler::{Compiler,generate_object_file};
 use crate::parser::ast::{Expr,Literal};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
 const PATH: &str = "warkusz.o";
 #[cfg(target_os = "windows")]
 const PATH: &str = "warkusz.obj";
-
 
 fn run_file(_file_path: &str)
 {

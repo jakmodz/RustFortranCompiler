@@ -179,11 +179,7 @@ impl Parser
         }
         else if self.match_keyword(Keyword::Do)
         {
-           if self.check_keyword(Keyword::While)
-           {
-               return self.parse_while_loop_stmt();
-           }
-           return self.parse_do_for_stmt();
+            return self.parse_do_stmt();
         }
         else if self.match_keyword(Keyword::Exit)
         {
@@ -194,13 +190,56 @@ impl Parser
 
         self.parse_assigment()
     }
+    fn parse_do_stmt(&mut self) -> Result<Box<Stmt>, ParsingError>
+    {
 
+        if self.check_keyword(Keyword::While)
+        {
+            return self.parse_while_loop_stmt();
+        }
+
+        if self.match_tokens(&[TokenType::Identifier(String::from(""))])
+        {
+            self.current -= 1;
+            return self.parse_do_for_stmt();
+        }
+
+        self.parse_do_infinite_stmt()
+
+    }
+    fn parse_do_infinite_stmt(&mut self) -> Result<Box<Stmt>, ParsingError>
+    {
+        let mut stmts = Vec::new();
+
+        while !self.check_keyword(Keyword::End)
+        {
+            if self.is_at_end() {
+                return Err(ParsingError::SyntaxError(
+                    self.previous().clone(),
+                    "Expected 'END DO' to close DO loop".to_string()
+                ));
+            }
+            let stmt = self.parse_statement()?;
+            stmts.push(*stmt);
+        }
+        
+        self.consume(TokenType::Keyword(Keyword::End), "Expected 'END' to close DO loop".to_string())?;
+        self.consume(TokenType::Keyword(Keyword::Do), "Expected 'DO' after 'END'".to_string())?;
+
+        let do_infinite_stmt = Stmt::DoInfinite
+        {
+            statements: stmts,
+        };
+
+        Ok(Box::new(do_infinite_stmt))
+    }
     fn parse_do_for_stmt(&mut self) -> Result<Box<Stmt>, ParsingError> {
 
         if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
         {
             return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
         }
+
         let var_name = self.previous().clone().lexeme;
 
 
