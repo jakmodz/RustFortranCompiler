@@ -44,6 +44,7 @@ impl Lexer
         keywords.insert("PROGRAM".to_string(), Keyword::Program);
         keywords.insert("PRINT".to_string(), Keyword::Print);
         keywords.insert("END".to_string(), Keyword::End);
+        keywords.insert("EXIT".to_string(), Keyword::Exit);
         keywords.insert("MODULE".to_string(), Keyword::Module);
         keywords.insert("USE".to_string(), Keyword::Use);
         keywords.insert("CONTAINS".to_string(), Keyword::Contains);

@@ -185,6 +185,10 @@ impl Parser
            }
            return self.parse_do_for_stmt();
         }
+        else if self.match_keyword(Keyword::Exit)
+        {
+            return Ok(Box::new(Stmt::Exit));
+        }
 
 
 

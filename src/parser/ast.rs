@@ -55,6 +55,7 @@ pub enum Stmt
     If{init_if:If,else_ifs: Vec<If>, else_last: Option<If>},
     DoWhile{cond:Expr,statements: Vec<Stmt>},
     DoFor{var_name:String,start:Expr,end:Expr,step:Option<Expr>,statements: Vec<Stmt>},
+    Exit,
 
 }
 #[derive(Debug,Clone)]

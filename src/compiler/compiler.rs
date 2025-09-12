@@ -132,7 +132,7 @@ impl Compiler
 
             for stmt in program.stmts
             {
-                Self::compile_stmt_helper(stmt, &mut builder, &mut self.variables, &mut self.variable_types, &mut self.module)?;
+                Self::compile_stmt_helper(stmt, &mut builder, &mut self.variables, &mut self.variable_types, &mut self.module,None)?;
             }
 
 
@@ -222,6 +222,7 @@ impl Compiler
         variables: &mut HashMap<String, Variable>,
         variable_types: &mut HashMap<String, VarType>,
         module: &mut ObjectModule,
+        exit_block: Option<Block>
     ) -> anyhow::Result<()>
     {
         match stmt
@@ -305,7 +306,7 @@ impl Compiler
                 {
                     let loop_header = builder.create_block();
                     let loop_block = builder.create_block();
-                    let after_loop_block = builder.create_block();
+                    let after_loop = builder.create_block();
 
                     builder.ins().jump(loop_header, &[]);
 
@@ -314,13 +315,13 @@ impl Compiler
                     let cond_value = Self::compile_expr_helper(builder, &cond, variables, variable_types, module)?;
                     let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
 
-                    builder.ins().brif(boolean_cond,loop_block,&[]
-                                       ,after_loop_block,&[]);
+                    builder.ins().brif(boolean_cond, loop_block, &[]
+                                       , after_loop, &[]);
 
                     builder.switch_to_block(loop_block);
                     for stmt in statements
                     {
-                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
                     }
 
                     builder.ins().jump(loop_header, &[]);
@@ -328,8 +329,8 @@ impl Compiler
 
                     builder.seal_block(loop_header);
 
-                    builder.switch_to_block(after_loop_block);
-                    builder.seal_block(after_loop_block);
+                    builder.switch_to_block(after_loop);
+                    builder.seal_block(after_loop);
                 }
             Stmt::DoFor {var_name,statements,end,start,step}=>
                 {
@@ -358,7 +359,7 @@ impl Compiler
                     builder.switch_to_block(loop_body);
                     for stmt in statements
                     {
-                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
                     }
 
 
@@ -379,6 +380,25 @@ impl Compiler
 
                     builder.switch_to_block(after_loop);
                     builder.seal_block(after_loop);
+                }
+            Stmt::Exit =>
+                {
+                    match exit_block
+                    {
+                        Some(exit_block) =>
+                        {
+                            builder.ins().jump(exit_block, &[]);
+
+                            let unreachable_block = builder.create_block();
+                            builder.switch_to_block(unreachable_block);
+                            builder.seal_block(unreachable_block);
+                        }
+                        None =>
+                        {
+
+                            return Err(RuntimeError::ExitOutsideLoop.into());
+                        }
+                    }
                 }
         }
         Ok(())
@@ -426,7 +446,8 @@ impl Compiler
                 builder,
                 variables,
                 variable_types,
-                module
+                module,
+                None
             )?;
         }
 
@@ -482,7 +503,8 @@ impl Compiler
                     builder,
                     variables,
                     variable_types,
-                    module
+                    module,
+                    None
                 )?;
             }
 
@@ -506,7 +528,8 @@ impl Compiler
                         builder,
                         variables,
                         variable_types,
-                        module
+                        module,
+                        None
                     )?;
                 }
 
@@ -547,7 +570,11 @@ impl Compiler
         builder.seal_block(then_block);
         for stmt in if_branch.statements
         {
-            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module)?;
+            Self::compile_stmt_helper(stmt, builder,
+                  variables, 
+                  variable_types,
+                  module,
+                  None)?;
         }
         builder.ins().jump(end_block, &[]);
         builder.switch_to_block(next_block);

@@ -17,6 +17,7 @@ pub enum RuntimeError
     PermissionDenied(String),
     UnknownError(String),
     NotDefinedVar(String),
+    ExitOutsideLoop,
 }
 impl std::fmt::Display for RuntimeError
 {
@@ -39,6 +40,7 @@ impl std::fmt::Display for RuntimeError
             RuntimeError::PermissionDenied(msg) => write!(f, "Runtime Error: Permission denied - {}", msg),
             RuntimeError::UnknownError(msg) => write!(f, "Runtime Error: Unknown error - {}", msg),
             RuntimeError::NotDefinedVar(var_name) => write!(f, "Runtime Error: Variable not defined - {}", var_name),
+            RuntimeError::ExitOutsideLoop => write!(f, "Runtime Error: 'Exit' statement used outside of a loop"),
         }
     }
 }
