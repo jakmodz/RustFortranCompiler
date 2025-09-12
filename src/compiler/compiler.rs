@@ -311,6 +311,94 @@ impl Compiler
         builder.seal_block(after_loop);
         Ok(())
     }
+    fn compile_do_infinite(
+        statements: Vec<Stmt>,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
+    {
+        let loop_header = builder.create_block();
+        let loop_body = builder.create_block();
+        let after_loop = builder.create_block();
+        builder.ins().jump(loop_header, &[]);
+
+        builder.switch_to_block(loop_header);
+        builder.ins().jump(loop_body, &[]);
+
+        builder.switch_to_block(loop_body);
+        for stmt in statements
+        {
+            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+        }
+        builder.ins().jump(loop_header, &[]);
+
+        builder.seal_block(loop_body);
+        builder.seal_block(loop_header);
+        builder.switch_to_block(after_loop);
+        builder.seal_block(after_loop);
+        Ok(())
+    }
+    fn compile_print(
+        format_descriptor: FormatSpec,
+        exprs: Vec<Box<Expr>>,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule
+    )-> anyhow::Result<()>
+    {
+        let value = Self::compile_expr_helper(builder, &exprs[0].as_ref().clone(), variables, variable_types, module)?;
+        let value_type = builder.func.dfg.value_type(value);
+
+        let (format_data, param_type) = if value_type == types::F32 || value_type == types::F64
+        {
+            (b"%f\n\0", value_type)
+        }
+        else
+        {
+            (b"%d\n\0", types::I32)
+        };
+
+        let printf_sig = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(param_type));
+            sig.returns.push(AbiParam::new(types::I32));
+            sig.call_conv = HOST_CALLCONV;
+            sig
+        };
+
+        let printf_func = module.declare_function("printf", Linkage::Import, &printf_sig)?;
+        let local_printf = module.declare_func_in_func(printf_func, builder.func);
+
+        let format_id = module.declare_data(
+            &format!("printf_format_{}_{}", builder.func.name, builder.func.dfg.num_values()),
+            Linkage::Local,
+            false,
+            false
+        )?;
+        let mut data_desc = cranelift_module::DataDescription::new();
+        data_desc.define(format_data.to_vec().into_boxed_slice());
+        module.define_data(format_id, &data_desc)?;
+
+        let format_global = module.declare_data_in_func(format_id, builder.func);
+        let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+        builder.ins().call(local_printf, &[format_ptr, value]);
+        Ok(())
+    }
+    fn compile_read(format_descriptor: FormatSpec,
+        var_name: String,
+        builder: &mut FunctionBuilder,
+        variables: &mut HashMap<String, Variable>,
+        variable_types: &mut HashMap<String, VarType>,
+        module: &mut ObjectModule) -> anyhow::Result<()>
+    {
+
+        Ok(())
+    }
     fn compile_stmt_helper(
         stmt: Stmt,
         builder: &mut FunctionBuilder,
@@ -342,49 +430,28 @@ impl Compiler
                         return Err(RuntimeError::NotDefinedVar(var_name).into());
                     }
                 }
-            Stmt::Print { expr } =>
+            Stmt::Print { exprs,format_descriptor } =>
             {
-                // print stmt is just implemented to print integers and floats to console for test. It is not a full implementation of Fortran print statement.
-                let value = Self::compile_expr_helper(builder, &expr.as_ref().clone(), variables, variable_types, module)?;
-                let value_type = builder.func.dfg.value_type(value);
-
-                let (format_data, param_type) = if value_type == types::F32 || value_type == types::F64
-                {
-                    (b"%f\n\0", value_type)
-                }
-                else
-                {
-                    (b"%d\n\0", types::I32)
-                };
-
-                let printf_sig = {
-                    let mut sig = module.make_signature();
-                    sig.params.push(AbiParam::new(types::I64));
-                    sig.params.push(AbiParam::new(param_type));
-                    sig.returns.push(AbiParam::new(types::I32));
-                    sig.call_conv = HOST_CALLCONV;
-                    sig
-                };
-
-                let printf_func = module.declare_function("printf", Linkage::Import, &printf_sig)?;
-                let local_printf = module.declare_func_in_func(printf_func, builder.func);
-
-                let format_id = module.declare_data(
-                    &format!("printf_format_{}_{}", builder.func.name, builder.func.dfg.num_values()),
-                    Linkage::Local,
-                    false,
-                    false
+                Self::compile_print(
+                    format_descriptor,
+                    exprs,
+                    builder,
+                    variables,
+                    variable_types,
+                    module
                 )?;
-                let mut data_desc = cranelift_module::DataDescription::new();
-                data_desc.define(format_data.to_vec().into_boxed_slice());
-                module.define_data(format_id, &data_desc)?;
-
-                let format_global = module.declare_data_in_func(format_id, builder.func);
-                let format_ptr = builder.ins().global_value(types::I64, format_global);
-
-                builder.ins().call(local_printf, &[format_ptr, value]);
             }
-
+            Stmt::Read {format_descriptor,var_name}=>
+                {
+                    Self::compile_read(
+                        format_descriptor,
+                        var_name,
+                        builder,
+                        variables,
+                        variable_types,
+                        module
+                    )?;
+                }
             Stmt::If {init_if, else_ifs, else_last} =>
                 {
                    Self::compile_if_statement(
@@ -424,25 +491,12 @@ impl Compiler
                 }
             Stmt::DoInfinite {statements}=>
                 {
-                    let loop_header = builder.create_block();
-                    let loop_body = builder.create_block();
-                    let after_loop = builder.create_block();
-                    builder.ins().jump(loop_header, &[]);
-
-                    builder.switch_to_block(loop_header);
-                    builder.ins().jump(loop_body, &[]);
-
-                    builder.switch_to_block(loop_body);
-                    for stmt in statements
-                    {
-                        Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
-                    }
-                    builder.ins().jump(loop_header, &[]);
-
-                    builder.seal_block(loop_body);
-                    builder.seal_block(loop_header);
-                    builder.switch_to_block(after_loop);
-                    builder.seal_block(after_loop);
+                    Self::compile_do_infinite(statements,
+                        builder,
+                        variables,
+                        variable_types,
+                        module
+                    )?;
                 }
             Stmt::Exit =>
                 {
@@ -458,7 +512,6 @@ impl Compiler
                         }
                         None =>
                         {
-
                             return Err(RuntimeError::ExitOutsideLoop.into());
                         }
                     }

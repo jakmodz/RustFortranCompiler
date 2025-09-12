@@ -1,6 +1,24 @@
 use std::fmt::Formatter;
 use crate::lexer::token::{Token, TokenType};
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatDescriptor 
+{
+    Integer { width: Option<u32>, minimum_digits: Option<u32> }, 
+    FixedReal { width: u32, decimal_places: u32 },              
+    ScientificReal { width: u32, decimal_places: u32 },         
+    Character { width: Option<u32> },                           
+    Skip { spaces: u32 },                                       
+    Literal(String),                                            
+    Repeat { count: u32, descriptors: Vec<FormatDescriptor> },  
+}
 
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormatSpec 
+{
+    ListDirected,                          // *
+    Formatted(Vec<FormatDescriptor>),      // '(I5,F8.2)'
+}
 #[derive(Debug,Clone)]
 pub enum Literal
 {
@@ -51,7 +69,9 @@ pub enum Stmt
 {
     Assignment{var_name:String,expr:Box<Expr>},
 
-    Print{expr:Box<Expr>},
+    Print{format_descriptor: FormatSpec,exprs:Vec<Box<Expr>>},
+    Read{format_descriptor: FormatSpec,var_name:String},
+    
     If{init_if:If,else_ifs: Vec<If>, else_last: Option<If>},
     DoWhile{cond:Expr,statements: Vec<Stmt>},
     DoFor{var_name:String,start:Expr,end:Expr,step:Option<Expr>,statements: Vec<Stmt>},
