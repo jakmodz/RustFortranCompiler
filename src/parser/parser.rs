@@ -173,6 +173,11 @@ impl Parser
             self.advance();
             return self.parse_print();
         }
+        else if  self.check_keyword(Keyword::Read)
+        {
+            self.advance();
+            return self.parse_read();
+        }
         else if self.check_keyword(Keyword::If)
         {
             return self.parse_if_statement();
@@ -206,6 +211,35 @@ impl Parser
 
         self.parse_do_infinite_stmt()
 
+    }
+    fn parse_read(&mut self)-> Result<Box<Stmt>, ParsingError>
+    {
+
+        let format_descriptor = self.parse_format_spec()?;
+        let mut var_names = Vec::new();
+        if self.match_tokens(&[TokenType::Comma])
+        {
+            loop
+            {
+                if !self.match_tokens(&[TokenType::Identifier(String::from(""))])
+                {
+                    return Err(ParsingError::UnexpectedToken(self.current_token().unwrap().clone()));
+                }
+                let var_name = self.previous().clone().lexeme;
+                var_names.push(var_name);
+
+                if !self.match_tokens(&[TokenType::Comma])
+                {
+                    break;
+                }
+            }
+        }
+        let read_stmt = Stmt::Read
+        {
+            format_descriptor,
+            var_names,
+        };
+        Ok(Box::new(read_stmt))
     }
     fn parse_do_infinite_stmt(&mut self) -> Result<Box<Stmt>, ParsingError>
     {
@@ -321,28 +355,30 @@ impl Parser
         let assignment = Stmt::Assignment{var_name:var_name.lexeme,expr};
         Ok(Box::new(assignment))
     }
-    fn parse_print(&mut self) -> Result<Box<Stmt>, ParsingError> {
-        // PRINT keyword has already been consumed
+    fn parse_print(&mut self) -> Result<Box<Stmt>, ParsingError>
+    {
 
-        // Parse the format specifier
         let format_descriptor = self.parse_format_spec()?;
 
-        // Parse the optional expression list
         let mut exprs = Vec::new();
 
-        // If there's a comma after format spec, parse expressions
-        if self.match_tokens(&[TokenType::Comma]) {
-            loop {
+
+        if self.match_tokens(&[TokenType::Comma])
+        {
+            loop
+            {
                 let expr = self.parse_expression()?;
                 exprs.push(expr);
 
-                if !self.match_tokens(&[TokenType::Comma]) {
+                if !self.match_tokens(&[TokenType::Comma])
+                {
                     break;
                 }
             }
         }
 
-        let print_stmt = Stmt::Print {
+        let print_stmt = Stmt::Print
+        {
             format_descriptor,
             exprs,
         };
@@ -352,10 +388,13 @@ impl Parser
 
     fn parse_format_spec(&mut self) -> Result<FormatSpec, ParsingError>
     {
-        if let Some(token) = self.current_token() {
-            match &token.token_type {
+        if let Some(token) = self.current_token()
+        {
+            match &token.token_type
+            {
 
-                TokenType::Star => {
+                TokenType::Star =>
+                    {
                     self.advance();
                     Ok(FormatSpec::ListDirected)
                 }
@@ -367,7 +406,6 @@ impl Parser
                     self.parse_format_string(format_str_copy.clone())
                 }
 
-                // Format label reference: PRINT 100, ... (where 100 is a format label)
                 TokenType::Int(label) =>
                 {
                     let label_copy = *label;
@@ -380,74 +418,87 @@ impl Parser
                     "Expected format specifier (*, format string, or format label)".to_string()
                 ))
             }
-        } else {
+        }
+        else
+        {
             Err(ParsingError::EndOfInput)
         }
     }
 
-    fn parse_format_string(&self, format_str: String) -> Result<FormatSpec, ParsingError> {
-        // Remove parentheses if present
+    fn parse_format_string(&self, format_str: String) -> Result<FormatSpec, ParsingError>
+    {
         let cleaned = format_str.trim_start_matches('(').trim_end_matches(')');
 
         let descriptors = self.parse_format_descriptors(cleaned)?;
         Ok(FormatSpec::Formatted(descriptors))
     }
 
-    fn parse_format_descriptors(&self, format_str: &str) -> Result<Vec<FormatDescriptor>, ParsingError> {
+    fn parse_format_descriptors(&self, format_str: &str) -> Result<Vec<FormatDescriptor>, ParsingError>
+    {
         let mut descriptors = Vec::new();
         let mut chars = format_str.chars().peekable();
 
-        while let Some(ch) = chars.peek() {
+        while let Some(ch) = chars.peek()
+        {
             match ch {
-                'I' | 'i' => {
+                'I' | 'i' =>
+                {
                     chars.next(); // consume 'I'
                     let (width, min_digits) = self.parse_integer_format(&mut chars)?;
                     descriptors.push(FormatDescriptor::Integer { width, minimum_digits: min_digits });
                 }
 
-                'F' | 'f' => {
+                'F' | 'f' =>
+                {
                     chars.next(); // consume 'F'
                     let (width, decimal_places) = self.parse_real_format(&mut chars)?;
                     descriptors.push(FormatDescriptor::FixedReal { width, decimal_places });
                 }
 
-                'E' | 'e' => {
+                'E' | 'e' =>
+                {
                     chars.next(); // consume 'E'
                     let (width, decimal_places) = self.parse_real_format(&mut chars)?;
                     descriptors.push(FormatDescriptor::ScientificReal { width, decimal_places });
                 }
 
-                'A' | 'a' => {
+                'A' | 'a' =>
+                {
                     chars.next(); // consume 'A'
                     let width = self.parse_optional_width(&mut chars)?;
                     descriptors.push(FormatDescriptor::Character { width });
                 }
 
-                'X' | 'x' => {
+                'X' | 'x' =>
+                {
                     chars.next(); // consume 'X'
                     // X format is typically preceded by a number (e.g., 5X)
                     descriptors.push(FormatDescriptor::Skip { spaces: 1 });
                 }
 
-                '\'' | '"' => {
+                '\'' | '"' =>
+                {
                     let quote_char = chars.next().unwrap();
                     let literal = self.parse_literal_string(&mut chars, quote_char)?;
                     descriptors.push(FormatDescriptor::Literal(literal));
                 }
 
-                ',' => {
-                    chars.next(); // consume comma and continue
+                ',' =>
+                {
+                    chars.next();
                 }
 
-                ' ' => {
-                    chars.next(); // skip whitespace
+                ' ' =>
+                {
+                    chars.next();
                 }
 
-                '0'..='9' => {
-                    // Handle repeat counts (e.g., 3I5, 2F8.2)
+                '0'..='9' =>
+                {
+
                     let count = self.parse_number(&mut chars)?;
 
-                    // Check what follows the number
+
                     if let Some(next_ch) = chars.peek() {
                         match next_ch {
                             'I' | 'i' | 'F' | 'f' | 'E' | 'e' | 'A' | 'a' => {
@@ -458,7 +509,8 @@ impl Parser
                                     descriptors: vec![next_descriptor]
                                 });
                             }
-                            'X' | 'x' => {
+                            'X' | 'x' =>
+                            {
                                 chars.next(); // consume 'X'
                                 descriptors.push(FormatDescriptor::Skip { spaces: count });
                             }
@@ -471,35 +523,41 @@ impl Parser
                         }
                     }
                 }
-
-                _ => {
+                _ =>
+                {
                     chars.next(); // skip unknown characters
                 }
             }
         }
-
         Ok(descriptors)
     }
 
-    fn parse_single_descriptor(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<FormatDescriptor, ParsingError> {
-        if let Some(ch) = chars.peek() {
-            match ch {
-                'I' | 'i' => {
+    fn parse_single_descriptor(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<FormatDescriptor, ParsingError>
+    {
+        if let Some(ch) = chars.peek()
+        {
+            match ch
+            {
+                'I' | 'i' =>
+                    {
                     chars.next();
                     let (width, min_digits) = self.parse_integer_format(chars)?;
                     Ok(FormatDescriptor::Integer { width, minimum_digits: min_digits })
                 }
-                'F' | 'f' => {
+                'F' | 'f' =>
+                    {
                     chars.next();
                     let (width, decimal_places) = self.parse_real_format(chars)?;
                     Ok(FormatDescriptor::FixedReal { width, decimal_places })
                 }
-                'E' | 'e' => {
+                'E' | 'e' =>
+                    {
                     chars.next();
                     let (width, decimal_places) = self.parse_real_format(chars)?;
                     Ok(FormatDescriptor::ScientificReal { width, decimal_places })
                 }
-                'A' | 'a' => {
+                'A' | 'a' =>
+                    {
                     chars.next();
                     let width = self.parse_optional_width(chars)?;
                     Ok(FormatDescriptor::Character { width })
@@ -509,33 +567,44 @@ impl Parser
                     format!("Unknown format descriptor: {}", ch)
                 ))
             }
-        } else {
+        }
+        else
+        {
             Err(ParsingError::EndOfInput)
         }
     }
 
-    fn parse_integer_format(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<(Option<u32>, Option<u32>), ParsingError> {
-        let width = if chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+    fn parse_integer_format(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<(Option<u32>, Option<u32>), ParsingError>
+    {
+        let width = if chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        {
             Some(self.parse_number(chars)?)
-        } else {
+        }
+        else
+        {
             None
         };
 
-        // Check for minimum digits specification (I5.3)
-        let min_digits = if chars.peek() == Some(&'.') {
+
+        let min_digits = if chars.peek() == Some(&'.')
+        {
             chars.next(); // consume '.'
             Some(self.parse_number(chars)?)
-        } else {
+        }
+        else
+        {
             None
         };
 
         Ok((width, min_digits))
     }
 
-    fn parse_real_format(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<(u32, u32), ParsingError> {
+    fn parse_real_format(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<(u32, u32), ParsingError>
+    {
         let width = self.parse_number(chars)?;
 
-        if chars.next() != Some('.') {
+        if chars.next() != Some('.')
+        {
             return Err(ParsingError::SyntaxError(
                 Token::new(TokenType::Character("".to_string()), "".to_string(), 0),
                 "Expected '.' in real format specifier".to_string()
@@ -546,27 +615,37 @@ impl Parser
         Ok((width, decimal_places))
     }
 
-    fn parse_optional_width(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<Option<u32>, ParsingError> {
-        if chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+    fn parse_optional_width(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<Option<u32>, ParsingError>
+    {
+        if chars.peek().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        {
             Ok(Some(self.parse_number(chars)?))
-        } else {
+        }
+        else
+        {
             Ok(None)
         }
     }
 
-    fn parse_number(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<u32, ParsingError> {
+    fn parse_number(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<u32, ParsingError>
+    {
         let mut num_str = String::new();
 
-        while let Some(&ch) = chars.peek() {
-            if ch.is_ascii_digit() {
+        while let Some(&ch) = chars.peek()
+        {
+            if ch.is_ascii_digit()
+            {
                 num_str.push(ch);
                 chars.next();
-            } else {
+            }
+            else
+            {
                 break;
             }
         }
 
-        if num_str.is_empty() {
+        if num_str.is_empty()
+        {
             return Err(ParsingError::SyntaxError(
                 Token::new(TokenType::Character("".to_string()), "".to_string(), 0),
                 "Expected number in format specifier".to_string()
@@ -582,16 +661,22 @@ impl Parser
     fn parse_literal_string(&self, chars: &mut std::iter::Peekable<std::str::Chars>, quote_char: char) -> Result<String, ParsingError> {
         let mut literal = String::new();
 
-        while let Some(ch) = chars.next() {
-            if ch == quote_char {
-                // Check for escaped quotes
-                if chars.peek() == Some(&quote_char) {
+        while let Some(ch) = chars.next()
+        {
+            if ch == quote_char
+            {
+                if chars.peek() == Some(&quote_char)
+                {
                     literal.push(ch);
-                    chars.next(); // consume the second quote
-                } else {
-                    break; // end of literal
+                    chars.next();
                 }
-            } else {
+                else
+                {
+                    break;
+                }
+            }
+            else
+            {
                 literal.push(ch);
             }
         }
@@ -981,9 +1066,4 @@ impl Parser
         }
     }
 }
-
-
-
-
-
 

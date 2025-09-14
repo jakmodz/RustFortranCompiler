@@ -70,7 +70,7 @@ pub enum Stmt
     Assignment{var_name:String,expr:Box<Expr>},
 
     Print{format_descriptor: FormatSpec,exprs:Vec<Box<Expr>>},
-    Read{format_descriptor: FormatSpec,var_name:String},
+    Read{format_descriptor: FormatSpec,var_names:Vec<String>},
     
     If{init_if:If,else_ifs: Vec<If>, else_last: Option<If>},
     DoWhile{cond:Expr,statements: Vec<Stmt>},

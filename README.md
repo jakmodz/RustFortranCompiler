@@ -21,7 +21,7 @@ This project implements a compiler for the Fortran 90/95 programming language, w
 - [X] Simple arithmetic expressions
 - [X] Basic DO loops
 - [X] IF statements
-- [ ] Simple I/O operations
+- [X] Simple I/O operations
 
 #### Phase 2: Core Fortran 90
 - [ ] All intrinsic data types (COMPLEX, LOGICAL, CHARACTER)

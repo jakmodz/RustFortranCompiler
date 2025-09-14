@@ -3,7 +3,7 @@
 pub enum RuntimeError
 {
     DivisionByZero,
-    IndexOutOfBounds,
+    IndexOutOfBounds(usize,usize),
     NullPointerDereference,
     StackOverflow,
     InvalidOperation(String),
@@ -26,7 +26,8 @@ impl std::fmt::Display for RuntimeError
         match self
         {
             RuntimeError::DivisionByZero => write!(f, "Runtime Error: Division by zero"),
-            RuntimeError::IndexOutOfBounds => write!(f, "Runtime Error: Index out of bounds"),
+            RuntimeError::IndexOutOfBounds(index1,index2) =>
+                write!(f, "Runtime Error: Index out of bounds - ({}, {})", index1,index2),
             RuntimeError::NullPointerDereference => write!(f, "Runtime Error: Null pointer dereference"),
             RuntimeError::StackOverflow => write!(f, "Runtime Error: Stack overflow"),
             RuntimeError::InvalidOperation(msg) => write!(f, "Runtime Error: Invalid operation - {}", msg),

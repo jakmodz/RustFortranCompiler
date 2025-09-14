@@ -1,0 +1,14 @@
+this program reads an integer from standard input and prints it to standard output
+PROGRAM test
+INTEGER :: x
+read *,x
+print *, x
+END PROGRAM test
+// example with multiple variables
+PROGRAM test
+INTEGER :: x
+REAL :: y
+read *,x,y
+print *, x, y
+END PROGRAM test
+// i/o operations are not fully supported, thus not all features may work as expected

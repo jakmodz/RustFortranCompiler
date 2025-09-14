@@ -56,7 +56,16 @@ impl TypeConverter
             _ => (left_val, right_val),
         }
     }
-
+    pub fn get_format_and_type(var_type: &VarType) -> (&'static str, cranelift_codegen::ir::Type)
+    {
+        match var_type {
+            VarType::Integer => ("%d", types::I32),
+            VarType::Real => ("%f", types::F32),
+            VarType::Character { .. } => ("%s", types::I64),
+            VarType::Logical => ("%d", types::I32),
+            VarType::Complex => ("%f%f", types::F32), // For two floats
+        }
+    }
 
 
 }

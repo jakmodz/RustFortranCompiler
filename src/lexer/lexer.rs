@@ -73,6 +73,7 @@ impl Lexer
         keywords.insert("ELSEIF".to_string(), Keyword::ElseIf);
         keywords.insert("DO".to_string(), Keyword::Do);
         keywords.insert("WHILE".to_string(), Keyword::While);
+        keywords.insert("READ".to_string(), Keyword::Read);
         Self {
             source: source.chars().collect(),
             keywords,

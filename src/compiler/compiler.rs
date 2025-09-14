@@ -8,22 +8,53 @@ use cranelift_codegen::settings::{Configurable, Flags};
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context as otherCtx, Error};
 use cranelift_codegen::Context;
 use cranelift_codegen::isa::CallConv;
 use target_lexicon::Triple;
 use crate::Common::type_resolver::{fortran_type_to_cranelift};
+
 use crate::compiler::runtime_error::RuntimeError;
 use crate::parser::program_unit::*;
 use crate::parser::ast::*;
 use crate::compiler::type_converter::TypeConverter;
+use crate::lexer::token::{Token, TokenType};
 
 #[cfg(target_os = "windows")]
 pub const HOST_CALLCONV: CallConv = CallConv::WindowsFastcall;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
 pub const HOST_CALLCONV: CallConv = CallConv::SystemV;
+pub struct CompilerState
+{
+    variables: HashMap<String, Variable>,
+    variable_types: HashMap<String, VarType>,
+    next_var_id: usize,
+}
 
+impl CompilerState
+{
+    pub fn new() -> Self
+    {
+        Self
+        {
+            variables: HashMap::with_capacity(64),
+            variable_types: HashMap::with_capacity(64),
+            next_var_id: 0,
+        }
+    }
+
+    pub fn get_or_create_variable(&mut self, name: &str, var_type: VarType) -> Variable
+    {
+        *self.variables.entry(name.to_string()).or_insert_with(||
+        {
+            let var = Variable::new(self.next_var_id);
+            self.next_var_id += 1;
+            self.variable_types.insert(name.to_string(), var_type);
+            var
+        })
+    }
+}
 pub struct Compiler
 {
     module: ObjectModule,
@@ -33,30 +64,35 @@ pub struct Compiler
     builder_context: FunctionBuilderContext,
     next_func_id: usize,
 
-    variables: HashMap<String, Variable>,
-    variable_types: HashMap<String, VarType>,
+    state:CompilerState,
     target:Triple
 }
 
 impl Compiler
 {
+    fn configure_compiler_flags(flag_builder: &mut cranelift_codegen::settings::Builder) -> anyhow::Result<()>
+    {
+        let flags = [
+            ("use_colocated_libcalls", "false"),
+            ("enable_verifier", "true"),
+            ("enable_alias_analysis", "false"),
+            ("opt_level", "none"),
+            ("enable_pinned_reg", "false"),
+            ("enable_nan_canonicalization", "false"),
+        ];
+
+        for (key, value) in &flags {
+            flag_builder.set(key, value)
+                .with_context(|| format!("Failed to set compiler flag: {}", key))?;
+        }
+        Ok(())
+    }
+
     pub fn new(module_name: &str) -> anyhow::Result<Self>
     {
         let target = Triple::host();
         let mut flag_builder = cranelift_codegen::settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false")?;
-        flag_builder.set("enable_verifier", "true")?;
-        flag_builder.set("enable_alias_analysis", "false")?;
-
-        flag_builder.set("opt_level", "none")?;
-        flag_builder.set("enable_pinned_reg", "false")?;
-        flag_builder.set("enable_nan_canonicalization", "false")?;
-        flag_builder.set("use_colocated_libcalls", "false")?;
-        flag_builder.set("enable_verifier", "true")?;
-        flag_builder.set("enable_alias_analysis", "false")?;
-        flag_builder.set("opt_level", "none")?;
-        flag_builder.set("enable_pinned_reg", "false")?;
-        flag_builder.set("enable_nan_canonicalization", "false")?;
+        Self::configure_compiler_flags(&mut flag_builder)?;
 
 
         let isa_builder = cranelift_codegen::isa::lookup(target.clone())?;
@@ -70,7 +106,8 @@ impl Compiler
         )?;
         let module = ObjectModule::new(obj_builder);
         let ctx = module.make_context();
-        Ok(Self
+        Ok(
+        Self
         {
             module,
             isa,
@@ -78,8 +115,7 @@ impl Compiler
             ctx,
             builder_context: FunctionBuilderContext::new(),
             next_func_id: 0,
-            variables: HashMap::new(),
-            variable_types: HashMap::new(),
+            state: CompilerState::new(),
             target
         })
     }
@@ -122,17 +158,17 @@ impl Compiler
             builder.switch_to_block(entry_block);
             builder.seal_block(entry_block);
 
-            self.variables.clear();
-            self.variable_types.clear();
+            self.state.variables.clear();
+            self.state.variable_types.clear();
 
             for decl in program.declarations
             {
-                Self::compile_decl_helper(decl, &mut builder, &mut self.variables, &mut self.variable_types, &mut self.module)?;
+                Self::compile_decl_helper(decl, &mut builder, &mut self.state,&mut self.module)?;
             }
 
             for stmt in program.stmts
             {
-                Self::compile_stmt_helper(stmt, &mut builder, &mut self.variables, &mut self.variable_types, &mut self.module,None)?;
+                Self::compile_stmt_helper(stmt, &mut builder, &mut self.state, &mut self.module,None)?;
             }
 
 
@@ -149,9 +185,9 @@ impl Compiler
         Ok(main_id)
     }
 
-    fn get_variable(builder: &mut FunctionBuilder, variables: &mut HashMap<String, Variable>, name: &str) -> anyhow::Result<Value>
+    fn get_variable(builder: &mut FunctionBuilder,state:&mut CompilerState, name: &str) -> anyhow::Result<Value>
     {
-        if let Some(var) = variables.get(name)
+        if let Some(var) = state.variables.get(name)
         {
             Ok(builder.use_var(*var))
         }
@@ -164,8 +200,7 @@ impl Compiler
     fn compile_decl_helper(
         decl: Declaration,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state: &mut CompilerState,
         module: &mut ObjectModule
     ) -> anyhow::Result<()>
     {
@@ -173,26 +208,51 @@ impl Compiler
         {
             Declaration::Variable {name, var_type, initial_value} =>
                 {
-                    let var = Variable::new(variables.len());
-                    variables.insert(name.clone(), var);
-                    variable_types.insert(name.clone(), var_type.clone());
-                    builder.declare_var(var, fortran_type_to_cranelift(&var_type));
-
-                    if let Some(value) = initial_value
+                    let var = state.get_or_create_variable(name.as_str(), var_type.clone());
+                builder.declare_var(var, fortran_type_to_cranelift(&var_type));
+                    match var_type
                     {
-                        let val = Self::compile_expr_helper(builder, &value, variables, variable_types, module)?;
-                        let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
-                        builder.def_var(var, converted_val);
+                        VarType::Integer |
+                        VarType::Real |
+                        VarType::Logical |
+                        VarType::Complex =>
+                            {
+                                if let Some(value) = initial_value
+                                {
+                                    let val = Self::compile_expr_helper(builder, &value,state, module,None)?;
+                                    let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
+
+                                    builder.def_var(var, converted_val);
+                                }
+                            }
+                        VarType::Character { len } =>
+                            {
+
+
+                                if let Some(value) = initial_value
+                                {
+                                    let val = Self::compile_expr_helper(builder, &value, state, module,Some(len))?;
+                                    builder.def_var(var,val);
+                                    return Ok(())
+                                }
+                                let stack_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                                    StackSlotKind::ExplicitSlot,
+                                    len as u32,
+                                ));
+
+                                let addr = builder.ins().stack_addr(types::I64, stack_slot, 0);
+                            builder.def_var(var, addr);
+                            }
                     }
+
+
                 }
             Declaration::Parameter {name, var_type, value} =>
                 {
-                    let var = Variable::new(variables.len());
-                    variables.insert(name.clone(), var);
-                    variable_types.insert(name.clone(), var_type.clone());
+                    let var = state.get_or_create_variable(name.as_str(), var_type.clone());
                     builder.declare_var(var, fortran_type_to_cranelift(&var_type));
 
-                    let val = Self::compile_expr_helper(builder, &value, variables, variable_types, module)?;
+                    let val = Self::compile_expr_helper(builder, &value, state, module,None)?;
                     let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
                     builder.def_var(var, converted_val);
                 }
@@ -202,13 +262,13 @@ impl Compiler
 
     fn declare_variable(&mut self, name: String, var_type: VarType, expr: Option<Expr>, builder: &mut FunctionBuilder) -> anyhow::Result<()>
     {
-        let var = Variable::new(self.variables.len());
-        self.variables.insert(name.clone(), var);
-        self.variable_types.insert(name.clone(), var_type.clone());
+        let var = Variable::new(self.state.variables.len());
+        self.state.variables.insert(name.clone(), var);
+        self.state.variable_types.insert(name.clone(), var_type.clone());
         builder.declare_var(var, fortran_type_to_cranelift(&var_type));
         if let Some(value) = expr
         {
-            let val = Self::compile_expr_helper(builder, &value, &mut self.variables, &mut self.variable_types, &mut self.module)?;
+            let val = Self::compile_expr_helper(builder, &value, &mut self.state, &mut self.module,None)?;
             let converted_val = TypeConverter::convert_value_to_type(builder, val, &var_type)?;
             builder.def_var(var, converted_val);
         }
@@ -218,8 +278,7 @@ impl Compiler
         cond: Expr,
         statements: Vec<Stmt>,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state:&mut CompilerState,
         module: &mut ObjectModule)-> anyhow::Result<()>
     {
         let loop_header = builder.create_block();
@@ -230,7 +289,7 @@ impl Compiler
 
         builder.switch_to_block(loop_header);
 
-        let cond_value = Self::compile_expr_helper(builder, &cond, variables, variable_types, module)?;
+        let cond_value = Self::compile_expr_helper(builder, &cond,state, module,None)?;
         let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
 
         builder.ins().brif(boolean_cond, loop_block, &[]
@@ -239,7 +298,7 @@ impl Compiler
         builder.switch_to_block(loop_block);
         for stmt in statements
         {
-            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+            Self::compile_stmt_helper(stmt, builder, state, module,Some(after_loop))?;
         }
 
         builder.ins().jump(loop_header, &[]);
@@ -258,20 +317,19 @@ impl Compiler
         step: Option<Expr>,
         statements: Vec<Stmt>,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state:&mut CompilerState,
         module: &mut ObjectModule
     ) -> anyhow::Result<()>
     {
         let i32_type = types::I32;
-        let loop_var =variables.get(&var_name).ok_or(RuntimeError::NotDefinedVar(var_name.clone()))?.clone();
+        let loop_var =state.variables.get(&var_name).ok_or(RuntimeError::NotDefinedVar(var_name.clone()))?.clone();
 
         let loop_header = builder.create_block();
         let loop_body = builder.create_block();
         let after_loop = builder.create_block();
 
 
-        let start_val = Self::compile_expr_helper(builder, &start, variables, variable_types, module)?;
+        let start_val = Self::compile_expr_helper(builder, &start, state, module,None)?;
         builder.def_var(loop_var, start_val);
 
 
@@ -280,7 +338,7 @@ impl Compiler
 
         builder.switch_to_block(loop_header);
         let current_val = builder.use_var(loop_var);
-        let end_val = Self::compile_expr_helper(builder, &end, variables, variable_types, module)?;
+        let end_val = Self::compile_expr_helper(builder, &end, state, module,None)?;
         let condition = builder.ins().icmp(IntCC::SignedLessThanOrEqual, current_val, end_val);
         builder.ins().brif(condition, loop_body, &[], after_loop, &[]);
 
@@ -288,7 +346,7 @@ impl Compiler
         builder.switch_to_block(loop_body);
         for stmt in statements
         {
-            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+            Self::compile_stmt_helper(stmt, builder,state, module,Some(after_loop))?;
         }
 
 
@@ -296,7 +354,7 @@ impl Compiler
         let step_val =
             match step
             {
-                Some(step_expr) => Self::compile_expr_helper(builder, &step_expr, variables, variable_types, module)?,
+                Some(step_expr) => Self::compile_expr_helper(builder, &step_expr, state, module,None)?,
                 None => builder.ins().iconst(i32_type, 1),
             };
         let next_val = builder.ins().iadd(current_val, step_val);
@@ -314,8 +372,7 @@ impl Compiler
     fn compile_do_infinite(
         statements: Vec<Stmt>,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state:&mut CompilerState,
         module: &mut ObjectModule
     ) -> anyhow::Result<()>
     {
@@ -330,7 +387,7 @@ impl Compiler
         builder.switch_to_block(loop_body);
         for stmt in statements
         {
-            Self::compile_stmt_helper(stmt, builder, variables, variable_types, module,Some(after_loop))?;
+            Self::compile_stmt_helper(stmt, builder, state, module,Some(after_loop))?;
         }
         builder.ins().jump(loop_header, &[]);
 
@@ -340,35 +397,111 @@ impl Compiler
         builder.seal_block(after_loop);
         Ok(())
     }
+    fn get_format_and_type(var_type: &VarType) -> (&'static str, cranelift_codegen::ir::Type)
+    {
+        match var_type {
+            VarType::Integer => ("%d", types::I32),
+            VarType::Real => ("%f", types::F32),
+            VarType::Character { .. } => ("%s", types::I64),
+            VarType::Logical => ("%d", types::I32),
+            VarType::Complex => ("%f+%fi", types::F32),
+        }
+    }
+    fn convert_fortran_format_to_printf(descriptors: &Vec<FormatDescriptor>) -> anyhow::Result<String>
+    {
+        let mut format_str = String::new();
+
+        for descriptor in descriptors
+        {
+            match descriptor {
+                FormatDescriptor::Integer { width: _,minimum_digits } => format_str.push_str("%d"),
+                FormatDescriptor::Character { width: _ } => format_str.push_str("%s"),
+                _ => {
+                    return Err(anyhow!("Unsupported format descriptor in PRINT statement"));
+                }
+            }
+        }
+
+        Ok(format_str)
+    }
+
     fn compile_print(
         format_descriptor: FormatSpec,
         exprs: Vec<Box<Expr>>,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state: &mut CompilerState,
         module: &mut ObjectModule
-    )-> anyhow::Result<()>
+    ) -> anyhow::Result<()>
     {
-        let value = Self::compile_expr_helper(builder, &exprs[0].as_ref().clone(), variables, variable_types, module)?;
-        let value_type = builder.func.dfg.value_type(value);
+        let mut format_str = String::new();
+        let mut arg_values = Vec::new();
 
-        let (format_data, param_type) = if value_type == types::F32 || value_type == types::F64
+        match format_descriptor
         {
-            (b"%f\n\0", value_type)
+            FormatSpec::ListDirected =>
+                {
+                for (i, expr) in exprs.iter().enumerate()
+                {
+                    let state_cpy = state.variable_types.clone();
+                    let var_type = match expr.as_ref()
+                    {
+
+                        Expr::Variable { name } => state_cpy.get(name).unwrap_or(&VarType::Integer),
+                        Expr::Literal { value } =>
+                            match value
+                            {
+                                Literal::Int(_) => &VarType::Integer,
+                                Literal::Real(_) => &VarType::Real,
+                                Literal::Double(_) => &VarType::Real,
+                                Literal::Character(s) => &VarType::Character { len: s.len() },
+                                Literal::Logical(_) => &VarType::Logical,
+                                _ => &VarType::Integer,
+                            },
+                        _ => &VarType::Integer,
+                    };
+
+                    let (fmt, _) = Self::get_format_and_type(var_type);
+                    format_str.push_str(fmt);
+                    if i < exprs.len() - 1
+                    {
+                        format_str.push(' ');
+                    }
+
+                    let value = Self::compile_expr_helper(builder, expr.as_ref(), state, module, None)?;
+
+                    let converted_value = match var_type
+                    {
+                        VarType::Integer => builder.ins().sextend(types::I64, value),
+                        VarType::Real =>
+                            {
+                                let double_val = builder.ins().fpromote(types::F64, value);
+                                builder.ins().bitcast(types::I64,MemFlags::new() ,double_val)
+                            },
+                        VarType::Character { .. } => value,
+                        VarType::Logical => builder.ins().sextend(types::I64, value),
+                        _ => builder.ins().sextend(types::I64, value),
+                    };
+
+                    arg_values.push(converted_value);
+                }
+            },
+            FormatSpec::Formatted(descriptors) =>
+            {
+                todo!("Formatted PRINT not implemented yet")
+            }
         }
-        else
-        {
-            (b"%d\n\0", types::I32)
-        };
 
-        let printf_sig = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(types::I64));
-            sig.params.push(AbiParam::new(param_type));
-            sig.returns.push(AbiParam::new(types::I32));
-            sig.call_conv = HOST_CALLCONV;
-            sig
-        };
+        format_str.push('\n');
+        format_str.push('\0');
+
+        let mut printf_sig = module.make_signature();
+        printf_sig.params.push(AbiParam::new(types::I64));
+        for _ in &arg_values
+        {
+            printf_sig.params.push(AbiParam::new(types::I64));
+        }
+        printf_sig.returns.push(AbiParam::new(types::I32));
+        printf_sig.call_conv = HOST_CALLCONV;
 
         let printf_func = module.declare_function("printf", Linkage::Import, &printf_sig)?;
         let local_printf = module.declare_func_in_func(printf_func, builder.func);
@@ -380,30 +513,248 @@ impl Compiler
             false
         )?;
         let mut data_desc = cranelift_module::DataDescription::new();
-        data_desc.define(format_data.to_vec().into_boxed_slice());
+        data_desc.define(format_str.as_bytes().to_vec().into_boxed_slice());
         module.define_data(format_id, &data_desc)?;
 
         let format_global = module.declare_data_in_func(format_id, builder.func);
         let format_ptr = builder.ins().global_value(types::I64, format_global);
 
-        builder.ins().call(local_printf, &[format_ptr, value]);
+        let mut call_args = vec![format_ptr];
+        call_args.extend(arg_values);
+
+        builder.ins().call(local_printf, &call_args);
+
         Ok(())
     }
-    fn compile_read(format_descriptor: FormatSpec,
+
+    fn compile_assignment(
         var_name: String,
+        expr: Expr,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state: &mut CompilerState,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<()>
+    {
+        let var = state.variables.get(&var_name).copied();
+        let var_type = state.variable_types.get(&var_name).cloned();
+
+        if let (Some(var), Some(var_type)) = (var, var_type)
+        {
+            match var_type
+            {
+                VarType::Character { len } =>
+                {
+                    let target_addr = builder.use_var(var);
+
+                    let source_addr = Self::compile_expr_helper(
+                        builder,
+                        &expr,
+                        state,
+                        module,
+                        Some(len)
+                    )?;
+
+                    for i in 0..len
+                    {
+                        let byte = builder.ins().load(types::I8, MemFlags::new(), source_addr, i as i32);
+                        builder.ins().store(MemFlags::new(), byte, target_addr, i as i32);
+                    }
+
+                    let zero = builder.ins().iconst(types::I8, 0);
+                    builder.ins().store(MemFlags::new(), zero, target_addr, len as i32);
+                }
+                _ =>
+                {
+                    let value = Self::compile_expr_helper(builder, &expr,state, module, None)?;
+                    let converted_value = TypeConverter::convert_value_to_type(builder, value, &var_type)?;
+                    builder.def_var(var, converted_value);
+                }
+            }
+        }
+        else
+        {
+            return Err(RuntimeError::NotDefinedVar(var_name).into());
+        }
+        Ok(())
+    }
+
+    fn compile_read(format_descriptor: FormatSpec,
+        var_names: Vec<String>,
+        builder: &mut FunctionBuilder,
+        state: &mut CompilerState,
         module: &mut ObjectModule) -> anyhow::Result<()>
     {
+        match format_descriptor {
+            FormatSpec::ListDirected => {
+                // For list-directed input, read each variable based on its type
+                for var_name in var_names {
+                    let var = state.variables.get(&var_name).copied()
+                        .ok_or_else(|| RuntimeError::NotDefinedVar(var_name.clone()))?;
+                    let var_type = state.variable_types.get(&var_name)
+                        .ok_or_else(|| RuntimeError::NotDefinedVar(var_name.clone()))?;
+
+                    match var_type {
+                        VarType::Integer => {
+
+                            let mut scanf_sig = module.make_signature();
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.returns.push(AbiParam::new(types::I32));
+                            scanf_sig.call_conv = HOST_CALLCONV;
+
+                            let scanf_func = module.declare_function("scanf", Linkage::Import, &scanf_sig)?;
+                            let local_scanf = module.declare_func_in_func(scanf_func, builder.func);
+
+
+                            let format_id = module.declare_data(
+                                &format!("scanf_int_format_{}", builder.func.dfg.num_values()),
+                                Linkage::Local,
+                                false,
+                                false
+                            )?;
+                            let mut data_desc = cranelift_module::DataDescription::new();
+                            data_desc.define(b"%d\0".to_vec().into_boxed_slice());
+                            module.define_data(format_id, &data_desc)?;
+
+                            let format_global = module.declare_data_in_func(format_id, builder.func);
+                            let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+
+                            let int_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                                StackSlotKind::ExplicitSlot,
+                                4
+                            ));
+                            let int_addr = builder.ins().stack_addr(types::I64, int_slot, 0);
+
+
+                            builder.ins().call(local_scanf, &[format_ptr, int_addr]);
+
+                            let loaded_value = builder.ins().load(types::I32, MemFlags::new(), int_addr, 0);
+                            builder.def_var(var, loaded_value);
+                        },
+                        VarType::Real => {
+
+                            let mut scanf_sig = module.make_signature();
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.returns.push(AbiParam::new(types::I32));
+                            scanf_sig.call_conv = HOST_CALLCONV;
+
+                            let scanf_func = module.declare_function("scanf", Linkage::Import, &scanf_sig)?;
+                            let local_scanf = module.declare_func_in_func(scanf_func, builder.func);
+
+
+                            let format_id = module.declare_data(
+                                &format!("scanf_float_format_{}", builder.func.dfg.num_values()),
+                                Linkage::Local,
+                                false,
+                                false
+                            )?;
+                            let mut data_desc = cranelift_module::DataDescription::new();
+                            data_desc.define(b"%f\0".to_vec().into_boxed_slice());
+                            module.define_data(format_id, &data_desc)?;
+
+                            let format_global = module.declare_data_in_func(format_id, builder.func);
+                            let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+
+                            let float_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                                StackSlotKind::ExplicitSlot,
+                                4
+                            ));
+                            let float_addr = builder.ins().stack_addr(types::I64, float_slot, 0);
+
+                            // Call scanf
+                            builder.ins().call(local_scanf, &[format_ptr, float_addr]);
+
+                            // Load the value and store it in the variable
+                            let loaded_value = builder.ins().load(types::F32, MemFlags::new(), float_addr, 0);
+                            builder.def_var(var, loaded_value);
+                        },
+                        VarType::Character { len } =>
+                            {
+
+                            let mut scanf_sig = module.make_signature();
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.params.push(AbiParam::new(types::I64));
+                            scanf_sig.returns.push(AbiParam::new(types::I32));
+                            scanf_sig.call_conv = HOST_CALLCONV;
+
+                            let scanf_func = module.declare_function("scanf", Linkage::Import, &scanf_sig)?;
+                            let local_scanf = module.declare_func_in_func(scanf_func, builder.func);
+
+                            let format_id = module.declare_data(
+                                &format!("scanf_string_format_{}", builder.func.dfg.num_values()),
+                                Linkage::Local,
+                                false,
+                                false
+                            )?;
+                            let mut data_desc = cranelift_module::DataDescription::new();
+                            data_desc.define(b"%s\0".to_vec().into_boxed_slice());
+                            module.define_data(format_id, &data_desc)?;
+
+                            let format_global = module.declare_data_in_func(format_id, builder.func);
+                            let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+                            let var_addr = builder.use_var(var);
+
+
+                            builder.ins().call(local_scanf, &[format_ptr, var_addr]);
+                        },
+                        VarType::Logical =>
+                            {
+                                let mut scanf_sig = module.make_signature();
+                                scanf_sig.params.push(AbiParam::new(types::I64));
+                                scanf_sig.params.push(AbiParam::new(types::I64));
+                                scanf_sig.returns.push(AbiParam::new(types::I32));
+                                scanf_sig.call_conv = HOST_CALLCONV;
+
+                                let scanf_func = module.declare_function("scanf", Linkage::Import, &scanf_sig)?;
+                                let local_scanf = module.declare_func_in_func(scanf_func, builder.func);
+
+                                let format_id = module.declare_data(
+                                    &format!("scanf_logical_format_{}", builder.func.dfg.num_values()),
+                                    Linkage::Local,
+                                    false,
+                                    false
+                                )?;
+                                let mut data_desc = cranelift_module::DataDescription::new();
+                                data_desc.define(b"%d\0".to_vec().into_boxed_slice());
+                                module.define_data(format_id, &data_desc)?;
+
+                                let format_global = module.declare_data_in_func(format_id, builder.func);
+                                let format_ptr = builder.ins().global_value(types::I64, format_global);
+
+                                let int_slot = builder.create_sized_stack_slot(StackSlotData::new(
+                                    StackSlotKind::ExplicitSlot,
+                                    4
+                                ));
+                                let int_addr = builder.ins().stack_addr(types::I64, int_slot, 0);
+
+                                builder.ins().call(local_scanf, &[format_ptr, int_addr]);
+
+
+                                let loaded_value = builder.ins().load(types::I32, MemFlags::new(), int_addr, 0);
+                                builder.def_var(var, loaded_value);
+                            },
+                        VarType::Complex =>
+                        {
+                            return Err(anyhow!("Complex input not supported yet"));
+                        }
+                    }
+                }
+            },
+            FormatSpec::Formatted(_descriptors) => {
+                return Err(anyhow!("Formatted READ not implemented yet"));
+            }
+        }
 
         Ok(())
     }
     fn compile_stmt_helper(
         stmt: Stmt,
         builder: &mut FunctionBuilder,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state:&mut CompilerState,
         module: &mut ObjectModule,
         exit_block: Option<Block>
     ) -> anyhow::Result<()>
@@ -412,23 +763,11 @@ impl Compiler
         {
             Stmt::Assignment { expr, var_name } =>
                 {
-                    let value = Self::compile_expr_helper(builder, &expr.as_ref().clone(), variables, variable_types, module)?;
-                    if let Some(var) = variables.get(&var_name)
-                    {
-                        if let Some(var_type) = variable_types.get(&var_name)
-                        {
-                            let converted_value = TypeConverter::convert_value_to_type(builder, value, var_type)?;
-                            builder.def_var(*var, converted_value);
-                        }
-                        else
-                        {
-                            return Err(RuntimeError::NotDefinedVar(var_name.clone()).into());
-                        }
-                    }
-                    else
-                    {
-                        return Err(RuntimeError::NotDefinedVar(var_name).into());
-                    }
+                    Self::compile_assignment(var_name,
+                        *expr,
+                        builder,
+                        state,
+                        module)?;
                 }
             Stmt::Print { exprs,format_descriptor } =>
             {
@@ -436,19 +775,17 @@ impl Compiler
                     format_descriptor,
                     exprs,
                     builder,
-                    variables,
-                    variable_types,
+                    state,
                     module
                 )?;
             }
-            Stmt::Read {format_descriptor,var_name}=>
+            Stmt::Read {format_descriptor,var_names}=>
                 {
                     Self::compile_read(
                         format_descriptor,
-                        var_name,
+                        var_names,
                         builder,
-                        variables,
-                        variable_types,
+                        state,
                         module
                     )?;
                 }
@@ -459,8 +796,7 @@ impl Compiler
                           init_if,
                           else_ifs,
                           else_last,
-                          variables,
-                          variable_types,
+                          state,
                           module
                    )?;
                 }
@@ -470,8 +806,7 @@ impl Compiler
                         cond,
                         statements,
                         builder,
-                        variables,
-                        variable_types,
+                        state,
                         module
                     )?;
                 }
@@ -484,8 +819,7 @@ impl Compiler
                           step,
                           statements,
                           builder,
-                          variables,
-                          variable_types,
+                          state,
                           module
                    )?;
                 }
@@ -493,8 +827,7 @@ impl Compiler
                 {
                     Self::compile_do_infinite(statements,
                         builder,
-                        variables,
-                        variable_types,
+                        state,
                         module
                     )?;
                 }
@@ -524,8 +857,7 @@ impl Compiler
         init_if: If,
         else_ifs: Vec<If>,
         else_last: Option<If>,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state: &mut CompilerState,
         module: &mut ObjectModule
     ) -> anyhow::Result<()>
     {
@@ -534,9 +866,9 @@ impl Compiler
         let cond_value = Self::compile_expr_helper(
             builder,
             &init_if.cond,
-            variables,
-            variable_types,
+            state,
             module
+            ,None
         )?;
 
         let if_block = builder.create_block();
@@ -560,8 +892,7 @@ impl Compiler
             Self::compile_stmt_helper(
                 stmt.clone(),
                 builder,
-                variables,
-                variable_types,
+                state,
                 module,
                 None
             )?;
@@ -599,9 +930,9 @@ impl Compiler
             let cond_value = Self::compile_expr_helper(
                 builder,
                 &else_if.cond,
-                variables,
-                variable_types,
-                module
+                state,
+                module,
+                None
             )?;
 
             let else_if_block = builder.create_block();
@@ -617,8 +948,7 @@ impl Compiler
                 Self::compile_stmt_helper(
                     stmt.clone(),
                     builder,
-                    variables,
-                    variable_types,
+                    state,
                     module,
                     None
                 )?;
@@ -642,8 +972,7 @@ impl Compiler
                     Self::compile_stmt_helper(
                         stmt.clone(),
                         builder,
-                        variables,
-                        variable_types,
+                        state,
                         module,
                         None
                     )?;
@@ -669,14 +998,13 @@ impl Compiler
     fn compile_if_branch(
         builder: &mut FunctionBuilder,
         if_branch: If,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
+        state: &mut CompilerState,
         module: &mut ObjectModule,
         next_block: Block,
         end_block: Block
     ) -> anyhow::Result<()>
     {
-        let cond_value = Self::compile_expr_helper(builder, &if_branch.cond, variables, variable_types, module)?;
+        let cond_value = Self::compile_expr_helper(builder, &if_branch.cond, state, module,None)?;
         let boolean_cond = Self::ensure_boolean_condition(builder, cond_value)?;
 
         let then_block = builder.create_block();
@@ -687,8 +1015,7 @@ impl Compiler
         for stmt in if_branch.statements
         {
             Self::compile_stmt_helper(stmt, builder,
-                  variables,
-                  variable_types,
+                  state,
                   module,
                   None)?;
         }
@@ -697,221 +1024,266 @@ impl Compiler
         builder.seal_block(next_block);
         Ok(())
     }
+    fn compile_binary_op(builder: &mut FunctionBuilder,
+        op: &TokenType,
+        left: &Expr,
+        right: &Expr,
+        state:&mut CompilerState,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<Value>
+    {
+        let left_val = Self::compile_expr_helper(builder, left, state, module,None)?;
+        let right_val = Self::compile_expr_helper(builder, right, state, module,None)?;
+
+        let left_type = builder.func.dfg.value_type(left_val);
+        let right_type = builder.func.dfg.value_type(right_val);
+
+        let (left_converted, right_converted) =TypeConverter::convert_operands(builder,left_val,left_type,right_val,right_type);
+
+        let result_type = builder.func.dfg.value_type(left_converted);
+
+        match op.lexeme()
+        {
+            "+" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fadd(left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().iadd(left_converted, right_converted))
+                    }
+                }
+            "-" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fsub(left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().isub(left_converted, right_converted))
+                    }
+                }
+            "*" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fmul(left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().imul(left_converted, right_converted))
+                    }
+                }
+            "/" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fdiv(left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().sdiv(left_converted, right_converted))
+                    }
+                }
+            "==" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::Equal, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::Equal, left_converted, right_converted))
+                    }
+                }
+            ">=" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::GreaterThanOrEqual, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, left_converted, right_converted))
+                    }
+                }
+            "<=" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::LessThanOrEqual, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::SignedLessThanOrEqual, left_converted, right_converted))
+                    }
+                }
+            ">" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::GreaterThan, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::SignedGreaterThan, left_converted, right_converted))
+                    }
+                }
+            "<" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::LessThan, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::SignedLessThan, left_converted, right_converted))
+                    }
+                }
+            "/=" =>
+                {
+                    if result_type.is_float()
+                    {
+                        Ok(builder.ins().fcmp(FloatCC::NotEqual, left_converted, right_converted))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().icmp(IntCC::NotEqual, left_converted, right_converted))
+                    }
+                }
+            ".AND."=>
+                {
+                    Ok(builder.ins().band(left_converted, right_converted))
+                }
+            ".OR."=>
+                {
+                    Ok(builder.ins().bor(left_converted, right_converted))
+                }
+            _ => Err(RuntimeError::InvalidOperation("uknown operator".to_string()).into())
+        }
+    }
+    fn compiler_literal_expr(builder: &mut FunctionBuilder, value: &Literal, str_len: Option<usize>) -> anyhow::Result<Value>
+    {
+        match value
+        {
+            Literal::Int(i) =>
+                {
+                    Ok(builder.ins().iconst(types::I32, *i))
+                }
+            Literal::Real(f) =>
+                {
+                    Ok(builder.ins().f32const(*f))
+                }
+            Literal::Double(d) =>
+                {
+                    Ok(builder.ins().f64const(*d))
+                }
+            Literal::Character(s) =>
+                {
+                    let size = s.len() + 1;
+                    let string_stack = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        size as u32
+                    ));
+
+                    let base_addr = builder.ins().stack_addr(types::I64, string_stack, 0);
+                    let string_bytes = s.as_bytes();
+                    let target_size = size - 1;
+
+                    for i in 0..target_size
+                    {
+                        let byte_value = if i < string_bytes.len()
+                        {
+                            string_bytes[i] as i64
+                        }
+                        else
+                        {
+                            32
+                        };
+
+                        let value = builder.ins().iconst(types::I8, byte_value);
+                        builder.ins().store(MemFlags::new(), value, base_addr, i as i32);
+                    }
+
+                    let zero = builder.ins().iconst(types::I8, 0);
+                    builder.ins().store(MemFlags::new(), zero, base_addr, (size - 1) as i32);
+
+                    Ok(base_addr)
+                }
+            Literal::Logical(bool) =>
+                {
+                    Ok(builder.ins().iconst(types::I32, *bool as i64))
+                }
+        }
+    }
+    fn compile_unary_op(
+        builder: &mut FunctionBuilder,
+        op:&Token,
+        expr: &Expr,
+        state:&mut CompilerState,
+        module: &mut ObjectModule
+    ) -> anyhow::Result<Value>
+    {
+        let val = Self::compile_expr_helper(builder, expr,state, module,None)?;
+        let val_type = builder.func.dfg.value_type(val);
+
+        match op.token_type.lexeme()
+        {
+            "-" =>
+                {
+                    if val_type.is_float()
+                    {
+                        Ok(builder.ins().fneg(val))
+                    }
+                    else
+                    {
+                        Ok(builder.ins().ineg(val))
+                    }
+                }
+            "+" =>
+                {
+                    Ok(val)
+                }
+            ".NOT." =>
+                {
+                    let zero = builder.ins().iconst(val_type, 0);
+                    Ok(builder.ins().icmp(IntCC::Equal, val, zero))
+                }
+            _ => Err(RuntimeError::InvalidOperation("unknown unary operator".to_string()).into())
+        }
+    }
     fn compile_expr_helper(
         builder: &mut FunctionBuilder,
         expr: &Expr,
-        variables: &mut HashMap<String, Variable>,
-        variable_types: &mut HashMap<String, VarType>,
-        module: &mut ObjectModule
+        state:&mut CompilerState,
+        module: &mut ObjectModule,
+        str_len: Option<usize>
     ) -> anyhow::Result<Value>
     {
         match expr
         {
             Expr::Literal { value } =>
                 {
-                    match value
-                    {
-                        Literal::Int(i) =>
-                            {
-                                Ok(builder.ins().iconst(types::I32, *i as i64))
-                            }
-                        Literal::Real(f) =>
-                            {
-                                Ok(builder.ins().f32const(*f))
-                            }
-                        Literal::Double(d) =>
-                            {
-                                Ok(builder.ins().f64const(*d))
-                            }
-                        Literal::Character(s) =>
-                            {
-                                let string_data = s.as_bytes();
-                                let data_id = module.declare_data("string_data", Linkage::Local, false, false)?;
-                                let mut data_desc = cranelift_module::DataDescription::new();
-                                data_desc.define(string_data.to_vec().into_boxed_slice());
-                                module.define_data(data_id, &data_desc)?;
-
-                                let global_value = module.declare_data_in_func(data_id, builder.func);
-                                Ok(builder.ins().global_value(types::I64, global_value))
-                            }
-                        Literal::Logical(bool) =>
-                            {
-                                Ok(builder.ins().iconst(types::I32, *bool as i64))
-                            }
-                    }
+                    Self::compiler_literal_expr(builder, value, str_len)
                 }
             Expr::BinaryOp { op, left, right } =>
                 {
-                    let left_val = Self::compile_expr_helper(builder, left, variables, variable_types, module)?;
-                    let right_val = Self::compile_expr_helper(builder, right, variables, variable_types, module)?;
-
-                    let left_type = builder.func.dfg.value_type(left_val);
-                    let right_type = builder.func.dfg.value_type(right_val);
-
-                    let (left_converted, right_converted) =TypeConverter::convert_operands(builder,left_val,left_type,right_val,right_type);
-
-                    let result_type = builder.func.dfg.value_type(left_converted);
-
-                    match op.lexeme()
-                    {
-                        "+" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fadd(left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().iadd(left_converted, right_converted))
-                                }
-                            }
-                        "-" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fsub(left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().isub(left_converted, right_converted))
-                                }
-                            }
-                        "*" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fmul(left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().imul(left_converted, right_converted))
-                                }
-                            }
-                        "/" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fdiv(left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().sdiv(left_converted, right_converted))
-                                }
-                            }
-                        "==" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::Equal, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::Equal, left_converted, right_converted))
-                                }
-                            }
-                        ">=" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::GreaterThanOrEqual, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, left_converted, right_converted))
-                                }
-                            }
-                        "<=" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::LessThanOrEqual, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::SignedLessThanOrEqual, left_converted, right_converted))
-                                }
-                            }
-                        ">" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::GreaterThan, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::SignedGreaterThan, left_converted, right_converted))
-                                }
-                            }
-                        "<" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::LessThan, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::SignedLessThan, left_converted, right_converted))
-                                }
-                            }
-                        "/=" =>
-                            {
-                                if result_type.is_float()
-                                {
-                                    Ok(builder.ins().fcmp(FloatCC::NotEqual, left_converted, right_converted))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().icmp(IntCC::NotEqual, left_converted, right_converted))
-                                }
-                            }
-                        ".AND."=>
-                            {
-                                Ok(builder.ins().band(left_converted, right_converted))
-                            }
-                        ".OR."=>
-                            {
-                                Ok(builder.ins().bor(left_converted, right_converted))
-                            }
-                        _ => Err(RuntimeError::InvalidOperation("uknown operator".to_string()).into())
-                    }
+                    Self::compile_binary_op(builder, op, left, right,state, module)
                 }
             Expr::UnaryOp { op, expr } =>
                 {
-                    let val = Self::compile_expr_helper(builder, expr, variables, variable_types, module)?;
-                    let val_type = builder.func.dfg.value_type(val);
-
-                    match op.token_type.lexeme()
-                    {
-                        "-" =>
-                            {
-                                if val_type.is_float()
-                                {
-                                    Ok(builder.ins().fneg(val))
-                                }
-                                else
-                                {
-                                    Ok(builder.ins().ineg(val))
-                                }
-                            }
-                        "+" =>
-                            {
-                                Ok(val)
-                            }
-                        ".NOT." =>
-                            {
-                                let zero = builder.ins().iconst(val_type, 0);
-                                Ok(builder.ins().icmp(IntCC::Equal, val, zero))
-                            }
-                        _ => Err(RuntimeError::InvalidOperation("unknown unary operator".to_string()).into())
-                    }
+                     Self::compile_unary_op(builder, op, expr,state, module)
                 }
             Expr::Grouping { expr } =>
                 {
-                    Self::compile_expr_helper(builder, expr, variables, variable_types, module)
+                    Self::compile_expr_helper(builder, expr, state, module,None)
                 }
             Expr::Variable { name } =>
                 {
-                    Ok(Self::get_variable(builder, variables, name)?)
+                    Ok(Self::get_variable(builder, state, name)?)
                 }
         }
     }

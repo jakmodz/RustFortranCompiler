@@ -388,7 +388,7 @@ mod tests_compiler
         let source = r#"
 PROGRAM test
 INTEGER :: x = 42
-PRINT x
+PRINT *,x
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -403,7 +403,7 @@ INTEGER :: x = 10
 INTEGER :: y = 20
 INTEGER :: z
 z = x + y
-PRINT z
+PRINT *,z
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -418,7 +418,7 @@ REAL :: x = 3.14
 REAL :: y = 2.71
 REAL :: z
 z = x * y
-PRINT z
+PRINT *,z
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -431,9 +431,9 @@ END PROGRAM test
 PROGRAM test
 INTEGER :: x = 5
 IF (x > 0) THEN
-    PRINT x
+    PRINT *,x
 ELSE
-    PRINT 0
+    PRINT *,0
 END IF
 END PROGRAM test
 "#;
@@ -448,11 +448,11 @@ PROGRAM test
 INTEGER :: x = 5
 INTEGER :: y = 10
 IF (x > y) THEN
-    PRINT x
+    PRINT *,x
 ELSEIF (x == y) THEN
-    PRINT 0
+    PRINT *,0
 ELSE
-    PRINT y
+    PRINT *,y
 END IF
 END PROGRAM test
 "#;
@@ -467,9 +467,9 @@ PROGRAM test
 INTEGER :: x = 5
 INTEGER :: y = 10
 IF (x > 0 .AND. y > 0) THEN
-    PRINT 0
+    PRINT *,0
 ELSE
-   PRINT 1
+   PRINT *,1
 END IF
 END PROGRAM test
 "#;
@@ -485,7 +485,7 @@ INTEGER :: i = 5
 REAL :: r = 3.14
 REAL :: result
 result = i + r
-PRINT result
+PRINT *,result
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -499,7 +499,7 @@ PROGRAM test
 INTEGER, PARAMETER :: MAX_VAL = 100
 INTEGER :: x
 x = MAX_VAL
-PRINT x
+PRINT *,x
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -525,13 +525,13 @@ PROGRAM test
 INTEGER :: x = 5
 INTEGER :: y = 10
 IF (x < y) THEN
-    PRINT 1
+    PRINT *,1
 END IF
 IF (x >= 5) THEN
-    PRINT 2
+    PRINT *,2
 END IF
 IF (x /= y) THEN
-    PRINT 3
+    PRINT *,3
 END IF
 END PROGRAM test
 "#;
@@ -544,7 +544,7 @@ END PROGRAM test
         let source = r#"
 PROGRAM test
 x = 5
-PRINT x
+PRINT *,x
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -556,14 +556,13 @@ END PROGRAM test
         let source = r#"
 PROGRAM test
 INTEGER :: x = 42
-PRINT x
+PRINT *, x
 END PROGRAM test
 "#;
         let compiler = compile_program(source).unwrap();
         let result = generate_object_file(compiler, "test_output.obj");
         assert!(result.is_ok());
 
-        // Clean up the test file
         std::fs::remove_file("test_output.obj").ok();
     }
 
@@ -575,7 +574,7 @@ INTEGER :: a = 1, b = 2, c = 3
 REAL :: x, y = 1.5, z
 x = a + b
 z = x * y
-PRINT z
+PRINT *,z
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -588,7 +587,7 @@ END PROGRAM test
 PROGRAM test
 INTEGER :: result
 result = 2 + 3 * 4
-PRINT result
+PRINT *,result
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -603,7 +602,7 @@ INTEGER :: x = 5
 INTEGER :: y = 10
 INTEGER :: z
 z = (x + y) * (x - y)
-PRINT z
+PRINT *,z
 END PROGRAM test
 "#;
         let result = compile_program(source);
@@ -616,9 +615,9 @@ END PROGRAM test
 PROGRAM test
 LOGICAL :: flag = .TRUE.
 IF (flag) THEN
-    PRINT 1
+    PRINT *,1
 ELSE
-    PRINT 0
+    PRINT*, 0
 END IF
 END PROGRAM test
 "#;
@@ -632,7 +631,7 @@ END PROGRAM test
         PROGRAM test
          INTEGER :: i = 1
           DO WHILE (i <= 5)
-               print  i
+               print  *,i
                i = i + 1
           END DO
         END PROGRAM test
@@ -648,11 +647,11 @@ END PROGRAM test
          INTEGER :: j = 1
           DO WHILE (i <= 5)
            DO WHILE (j <= 5)
-               print  j
+               print  *,j
                j = j + 1
             END DO
             i = i + 1
-            print i
+            print *,i
           END DO
         END PROGRAM test
                 "#;
@@ -665,7 +664,7 @@ END PROGRAM test
         PROGRAM test
          INTEGER :: i
           DO i = 1, 5
-               print  i
+               print  *,i
           END DO
         END PROGRAM test
                 "#;
@@ -678,7 +677,7 @@ END PROGRAM test
         PROGRAM test
          INTEGER :: i
           DO i = 1, 5 , 1
-               print  i
+               print *, i
           END DO
         END PROGRAM test
                 "#;
@@ -691,7 +690,7 @@ END PROGRAM test
         PROGRAM test
         INTEGER :: x = 5
         if (.NOT.(x <= 5)) then
-        print x
+        print *,x
          end if
         END PROGRAM test"#;
         let result = compile_program(source);
@@ -702,7 +701,7 @@ END PROGRAM test
         let source = r#"
         PROGRAM test
           DO
-               print  'infinite loop'
+               print *,'infinite loop'
           END DO
         END PROGRAM test
                 "#;
@@ -715,8 +714,10 @@ END PROGRAM test
         PROGRAM test
          INTEGER :: i = 1
           DO WHILE (i <= 5)
-               if (i == 3) exit
-               print  i
+               if (i == 3) then
+               exit
+               END IF
+               PRINNT *,i
                i = i + 1
           END DO
         END PROGRAM test
